@@ -195,6 +195,9 @@ The project is still in an early state, I cannot guarantee measurement correctne
 ### Disclaimer
 This project is not affiliated with, endorsed by, or associated with Alientek or any of its subsidiaries.
 
+## Use of AI
+Claude Opus 4.6 used to write (some of) the Readme files
+
 ## Run from Source
 
 ```powershell

@@ -1,0 +1,78 @@
+name: Build
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+env:
+  DM40_PYTHON: python
+  CI: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: .github/workflows/CI-requirements.txt
+
+      - name: Install Nuitka
+        run: pip install -r .github/workflows/CI-requirements.txt
+
+      - name: Get Nuitka version
+        id: nuitka-ver
+        run: |
+          $ver = python -c "import nuitka.Version; print(nuitka.Version.getNuitkaVersion())"
+          echo "version=$ver" >> $env:GITHUB_OUTPUT
+
+      - name: Cache Nuitka tools
+        uses: actions/cache@v5
+        with:
+          path: ~\AppData\Local\Nuitka\Nuitka\Cache
+          key: nuitka-tools-${{ runner.os }}-${{ steps.nuitka-ver.outputs.version }}
+          restore-keys: nuitka-tools-${{ runner.os }}-
+
+      - name: Stamp version
+        id: version
+        env:
+          GH_REF: ${{ github.ref }}
+          GH_REF_NAME: ${{ github.ref_name }}
+          GH_SHA: ${{ github.sha }}
+        run: |
+          if ($env:GH_REF.StartsWith("refs/tags/v")) {
+            $ver = $env:GH_REF_NAME.TrimStart("v")
+          } else {
+            $ver = $env:GH_SHA.Substring(0, 7)
+          }
+          echo "ver=$ver" >> $env:GITHUB_OUTPUT
+          Set-Content -Path dm40/__version__.py -Value "__version__ = `"$ver`"`n"
+
+      - name: Build
+        run: cmd /c build_release.cmd
+
+      - name: Rename exe
+        run: |
+          $src = "build\ci\nuitka\main.onefile-build\DM40GUI.exe"
+          $dst = "build\ci\nuitka\main.onefile-build\DM40GUI-${{ steps.version.outputs.ver }}.exe"
+          Move-Item $src $dst
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          path: build\ci\nuitka\main.onefile-build\DM40GUI-${{ steps.version.outputs.ver }}.exe
+          archive: false
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build\ci\nuitka\main.onefile-build\DM40GUI-*.exe
