@@ -21,11 +21,11 @@ DM40GUI is a Windows desktop app for DM40-series multimeters over Bluetooth Low 
   <img src="docs/screenshots/app-graph-selected.png" alt="DM40 graph range selection with min/max/delta tooltip" width="918"/>
 </p>
 
-### Controls
+### DMM Controls
 
 - Hold, auto-range, relative, and mode/range switching
-- Scan and connect/disconnect from the UI
-- Custom BLE stack (`dm40/nanowinbt`) — no external Bluetooth libraries
+- Status indicators (charge, screen lock and hold) are also displayed
+- Almost 100% feature compatibility with atk-xtool
 
 ### Raw Packet Inspector
 
@@ -102,7 +102,7 @@ Waveform mouse actions:
 
 ## Protocol Notes
 
-Reverse-engineered from BLE traffic captures.
+Reverse-engineered from BLE HCI packets with Wireshark.
 
 ### BLE Endpoints
 
