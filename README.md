@@ -6,6 +6,7 @@ DM40GUI is a Windows desktop app for DM40-series multimeters over Bluetooth Low 
 - Tkinter UI
 - Pure Python runtime from source (no third-party runtime dependencies)
 
+## BRANDING MATERIAL NEEDED (ICON&BANNER), WILL PAY!!!
 
 ## Features
 
@@ -30,7 +31,7 @@ DM40GUI is a Windows desktop app for DM40-series multimeters over Bluetooth Low 
 ### Raw Packet Inspector
 
 - Hex packet log with inline CRC pass/fail tags
-- Find popup (`Ctrl+F` / `F3` / `Shift+F3`)
+- Find tool (`Ctrl+F` / `F3` / `Shift+F3`)
 
 ### Themes
 
@@ -50,13 +51,15 @@ Connection parameter tuning (`IBluetoothLEDevice6`) is available on Windows 11+ 
 Runtime (source):
 
 - Windows 10 1703+
-- Python 3.13 with Tkinter
+- Python 3.13+ with Tkinter
 
 Release build:
 
-- Python 3.13
+- Python 3.13+
 - Nuitka
 - MSVC Build Tools (Nuitka `--msvc=latest` target)
+
+Notes: Older python versions untested.
 
 ## Keybinds
 
@@ -180,8 +183,16 @@ CRC check:
 | `& 0x40` | Screen lock |
 | `& 0x80` | Hold |
 
-## Disclaimer
+## Notes:
 
+### Stability
+The project is still in an early state, I cannot guarantee measurement correctness for multiple reasons:
+
+1. The DMM doesn't expose all measurement scale/range byte variations unless I am measuring in that specific scale, without decade boxes I'm unable to verify all scale/ranges due to this, if the App crashes with a KeyError the scale is probably not implemented yet, please report this.
+
+2. I do NOT have a lot of time to work on this.
+
+### Disclaimer
 This project is not affiliated with, endorsed by, or associated with Alientek or any of its subsidiaries.
 
 ## Run from Source
