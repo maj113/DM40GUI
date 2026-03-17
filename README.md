@@ -6,17 +6,6 @@ DM40GUI is a Windows desktop app for DM40-series multimeters over Bluetooth Low 
 - Tkinter UI
 - Pure Python runtime from source (no third-party runtime dependencies)
 
-## Table of Contents
-
-- [Features](#features)
-- [Requirements](#requirements)
-- [Keybinds](#keybinds)
-- [Project Layout](#project-layout)
-- [Protocol Notes](#protocol-notes)
-- [Run from Source](#run-from-source)
-- [Build for Release](#build-for-release)
-- [License](#license)
-- [Disclaimer](#disclaimer)
 
 ## Features
 
