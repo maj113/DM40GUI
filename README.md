@@ -1,6 +1,6 @@
 # DM40GUI
 
-[![Build](https://github.com/maj113/DM40GUI/actions/workflows/build.yml/badge.svg)](https://github.com/maj113/DM40GUI/actions/workflows/build.yml)
+[![Build](https://github.com/maj113/DM40GUI/actions/workflows/build.yml/badge.svg)](https://github.com/maj113/DM40GUI/actions/workflows/build.yml) [![GitHub Release](https://img.shields.io/github/v/release/maj113/DM40GUI)](https://github.com/maj113/DM40GUI/releases/latest)
 
 DM40GUI is a Windows desktop app for DM40-series multimeters over Bluetooth Low Energy (BLE).
 
@@ -10,7 +10,7 @@ DM40GUI is a Windows desktop app for DM40-series multimeters over Bluetooth Low 
 
 ## BRANDING MATERIAL NEEDED (ICON&BANNER), WILL PAY!!!
 
-## [Download](https://github.com/maj113/DM40GUI/releases/latest)
+## Go to the latest [Release](https://github.com/maj113/DM40GUI/releases/latest) page to download the latest build
 
 ## Features
 
@@ -199,7 +199,7 @@ The project is still in an early state, I cannot guarantee measurement correctne
 ### Disclaimer
 This project is not affiliated with, endorsed by, or associated with Alientek or any of its subsidiaries.
 
-## Use of AI
+### Use of AI
 Claude Opus 4.6 used to write (some of) the Readme files
 
 ## Run from Source
