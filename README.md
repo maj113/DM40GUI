@@ -1,5 +1,7 @@
 # DM40GUI
 
+[![Build](https://github.com/maj113/DM40GUI/actions/workflows/build.yml/badge.svg)](https://github.com/maj113/DM40GUI/actions/workflows/build.yml)
+
 DM40GUI is a Windows desktop app for DM40-series multimeters over Bluetooth Low Energy (BLE).
 
 - Windows only (if someone wants to maintain a non-Bleak Linux BLE stack let me know)
@@ -7,6 +9,8 @@ DM40GUI is a Windows desktop app for DM40-series multimeters over Bluetooth Low 
 - Pure Python runtime from source (no third-party runtime dependencies)
 
 ## BRANDING MATERIAL NEEDED (ICON&BANNER), WILL PAY!!!
+
+## [Download](https://github.com/maj113/DM40GUI/releases/latest)
 
 ## Features
 
