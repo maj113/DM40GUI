@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-"""DM40 application entrypoint."""
-
 if '__compiled__' in globals(): # type: ignore[name-defined]
     import shims
     shims.install()
