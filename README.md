@@ -10,7 +10,7 @@ DM40GUI is a Windows desktop app for DM40-series multimeters over Bluetooth Low 
 
 ## BRANDING MATERIAL NEEDED (ICON&BANNER), WILL PAY!!!
 
-## Go to the latest [Release](https://github.com/maj113/DM40GUI/releases/latest) page to download the latest build
+## Go to the [Release](https://github.com/maj113/DM40GUI/releases/latest) page to download the latest build
 
 ## Features
 
