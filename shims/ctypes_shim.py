@@ -9,7 +9,7 @@ from _ctypes import (
     FUNCFLAG_USE_ERRNO as _FUNCFLAG_USE_ERRNO,
     FUNCFLAG_USE_LASTERROR as _FUNCFLAG_USE_LASTERROR,
     LoadLibrary as _LoadLibrary,
-    sizeof, byref,
+    sizeof, byref, addressof,
     _memmove_addr, _string_at_addr, _cast_addr, _wstring_at_addr, # type: ignore
 )
 
