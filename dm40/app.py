@@ -604,7 +604,7 @@ class DM40App(tk.Tk):
         except Exception as exc:
             self.after(0, self._scan_failed, scan_id, exc)
             return
-        self.after(0, self._scan_complete, scan_id, devices)
+        self.after(0, self._scan_complete, scan_id, devices or [])
 
     def _scan_add_device(self, scan_id: int, device) -> None:
         if scan_id != self._scan_generation:
