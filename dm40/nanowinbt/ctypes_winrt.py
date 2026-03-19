@@ -24,15 +24,14 @@ _PINT16 = ctypes.POINTER(ctypes.c_int16)
 _PUINT32 = ctypes.POINTER(ctypes.c_uint32)
 _PUINT64 = ctypes.POINTER(ctypes.c_uint64)
 
-def _guid(s: str):
-    h = s.replace("-", "").strip("{}")
-    return GUID(*(
-        int(h[0:8], 16).to_bytes(4, 'little')
-        + int(h[8:12], 16).to_bytes(2, 'little')
-        + int(h[12:16], 16).to_bytes(2, 'little')
-        + bytes.fromhex(h[16:])
-    ))
-
+def _guid(s: str,
+    _r=str.replace, _h=bytearray.fromhex, _f=GUID.from_buffer_copy,
+):
+    b = _h(_r(s, "-", ""))
+    b[0:4] = b[3::-1]
+    b[4:6] = b[5:3:-1]
+    b[6:8] = b[7:5:-1]
+    return _f(b)
 
 IID_IASYNC_INFO = _guid("00000036-0000-0000-C000-000000000046")
 IID_IAGILE_OBJECT = _guid("94EA2B94-E9CC-49E0-C0FF-EE64CA8F5B90")
@@ -240,7 +239,8 @@ _ARG_UINT32 = (ctypes.c_uint32,)
 
 def _check_hresult(hr: int, context: str) -> None:
     if hr < 0:
-        raise WinRTError(f"{context} failed with HRESULT 0x{hr & 0xFFFFFFFF:08X}")
+        raise WinRTError("%s failed with HRESULT 0x%08X" % (context, hr & 0xFFFFFFFF))
+
 
 
 def get_activation_factory(runtime_class: str, iid) -> ComPtr:
