@@ -8,19 +8,20 @@ class NanoRadioStateError(RuntimeError):
 _INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
 _RADIO_FUNCS = None
 
+# byref holds a strong ref to the c_ulong via PyCArgObject.obj (Py_NewRef);
+# safe to cache at module level — verified against CPython 3.10–3.14 source.
+_FIND_RADIO_PARAMS_PTR = ctypes.byref(ctypes.c_ulong(4))  # sizeof(BLUETOOTH_FIND_RADIO_PARAMS)
+
 
 def _load_radio_functions():
     global _RADIO_FUNCS
     if _RADIO_FUNCS is not None:
         return _RADIO_FUNCS
 
-    bth = ctypes.WinDLL("bthprops.cpl", use_last_error=True)
+    bth = ctypes.WinDLL("bthprops.cpl")
 
     find_first = bth.BluetoothFindFirstRadio
-    find_first.argtypes = [
-        ctypes.POINTER(ctypes.c_ulong),
-        ctypes.POINTER(ctypes.c_void_p),
-    ]
+    find_first.argtypes = [ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_void_p)]
     find_first.restype = ctypes.c_void_p
 
     find_next = bth.BluetoothFindNextRadio
@@ -49,39 +50,29 @@ def get_bluetooth_radio_state() -> str:
     except Exception:
         return "unknown"
 
-    params = ctypes.c_ulong(4)  # sizeof(BLUETOOTH_FIND_RADIO_PARAMS) = 4
     radio_handle = ctypes.c_void_p()
-    finder = find_first(ctypes.byref(params), ctypes.byref(radio_handle))
+    radio_handle_ref = ctypes.byref(radio_handle)
+
+    finder = find_first(_FIND_RADIO_PARAMS_PTR, radio_handle_ref)
     if not finder or finder == _INVALID_HANDLE_VALUE:
         return "off"
 
-    any_connectable = False
-
     try:
         while True:
-            try:
-                if is_connectable(radio_handle):
-                    any_connectable = True
-                    break
-            finally:
-                if radio_handle:
-                    close_handle(radio_handle)
-                    radio_handle = ctypes.c_void_p()
+            connectable = is_connectable(radio_handle)
+            close_handle(radio_handle)
 
-            next_handle = ctypes.c_void_p()
-            if not find_next(finder, ctypes.byref(next_handle)):
-                break
-            radio_handle = next_handle
+            if connectable:
+                return "on"
+
+            if not find_next(finder, radio_handle_ref):
+                return "off"
     finally:
         find_close(finder)
 
-    return "on" if any_connectable else "off"
-
 
 def ensure_bluetooth_radio_on(operation: str) -> None:
-    state = get_bluetooth_radio_state()
-    if state != "off":
-        return
-    raise NanoRadioStateError(
-        f"Bluetooth radio appears OFF; cannot {operation}. Turn Bluetooth on and retry."
-    )
+    if get_bluetooth_radio_state() == "off":
+        raise NanoRadioStateError(
+            f"Bluetooth radio appears OFF; cannot {operation}. Turn Bluetooth on and retry."
+        )
