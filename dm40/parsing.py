@@ -100,6 +100,8 @@ def resolve_slot_scale(slot: str, kind: str, sign_flag: int):
         info = AMP_SCALE_MAP[scale_flag]
     elif slot == "M1" and kind in ("RES", "RES_ONLINE", "CONT"):
         info = RES_SCALE_MAP[scale_flag]
+    elif slot == "TC" and kind == "TEMP":
+        info = (6000.0, "°C", 1.0, 1)
     elif slot == "RES" and kind == "DIODE":
         return 6000.0 * factor, "Ω", 1.0, 1
     else:
