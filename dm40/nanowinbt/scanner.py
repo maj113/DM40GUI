@@ -116,7 +116,7 @@ async def _await_ptr(operation_ptr, handler_iid, timeout: float, op_name: str, *
                 code = w.asyncinfo_get_error_code(async_info.ptr)
             finally:
                 async_info.release()
-            raise w.WinRTError(f"IAsyncOperation error {op_name}: 0x{code & 0xFFFFFFFF:08X}")
+            raise w.WinRTError("IAsyncOperation error %s: 0x%08X" % (op_name, code & 0xFFFFFFFF))
         return w.asyncop_get_results_ptr(op.ptr) if get_results else None
     finally:
         timeout_handle.cancel()

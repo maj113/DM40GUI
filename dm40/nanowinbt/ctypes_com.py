@@ -32,7 +32,7 @@ class RoSession:
             return
         hr = _ro_initialize(RO_INIT_MULTITHREADED)
         if hr < 0 and hr != -2147417850:
-            raise RuntimeError(f"RoInitialize failed: 0x{hr & 0xFFFFFFFF:08X}")
+            raise RuntimeError("RoInitialize failed: 0x%08X" % (hr & 0xFFFFFFFF))
         self._state = 2 if hr in (0, 1) else 1
 
     def uninitialize(self) -> None:
