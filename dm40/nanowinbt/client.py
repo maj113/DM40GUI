@@ -121,7 +121,7 @@ class NanoClient:
                 if matched is not None:
                     self._chars[matched] = w.ComPtr(cp)
                 else:
-                    w.ComPtr(cp).release()
+                    w.release_ptr(cp)
             if targets:
                 raise NanoClientError(f"Characteristics not found: {[*targets.values()]}")
         finally:
