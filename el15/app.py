@@ -1,8 +1,7 @@
-"""EL15 DC Electronic Load Tkinter application."""
+"""EL15 device handler."""
 import tkinter as tk
 from tkinter import ttk
 
-from shared.base_app import BaseDeviceApp
 from shared.ble_worker import BleWorker
 from GUI.themed_messagebox import show_error
 
@@ -35,18 +34,20 @@ def _el15_notify_filter(data: bytes) -> bool:
     return data[:4] == HEADER
 
 
-class EL15App(BaseDeviceApp):
-    _title_base = "EL15"
-    _csv_prefix = "EL15"
+class EL15Handler:
+    title = "EL15"
+    csv_prefix = "EL15"
 
-    def _init_device_state(self) -> None:
+    def __init__(self, app) -> None:
+        self.app = app
         self._last_status: EL15Status | None = None
         self._mode_buttons: dict[int, ttk.Checkbutton] = {}
         self._mode_vars: dict[int, tk.BooleanVar] = {}
         self._load_var = tk.BooleanVar(value=False)
         self._active_mode = MODE_CC
+        self._all_controls: list = []
 
-    def _create_worker(self, device, **callbacks):
+    def create_worker(self, device, **callbacks):
         return BleWorker(
             device,
             poll_cmd=POLL_PKT,
@@ -55,16 +56,14 @@ class EL15App(BaseDeviceApp):
             **callbacks,
         )
 
-    def _build_menubar_labels(self, menubar) -> None:
-        tk.Label(menubar, text="EL15", font=("Segoe UI", 11, "bold")).grid(
-            row=0, column=3, sticky="e"
-        )
+    def build_menubar_labels(self, pre: tk.Frame, post: tk.Frame) -> None:
+        tk.Label(pre, text="EL15", font=("Segoe UI", 11, "bold")).pack(side="left")
         self._mode_label_var = tk.StringVar(value="")
-        tk.Label(menubar, textvariable=self._mode_label_var).grid(
-            row=0, column=5, sticky="e", padx=(0, 8)
+        tk.Label(post, textvariable=self._mode_label_var).pack(
+            side="left", padx=(0, 8)
         )
 
-    def _build_reading_area(self, parent: tk.Frame) -> None:
+    def build_reading_area(self, parent: tk.Frame) -> None:
         readings = tk.Frame(parent)
         readings.pack(fill=tk.X)
         readings.columnconfigure(0, weight=1)
@@ -104,7 +103,7 @@ class EL15App(BaseDeviceApp):
                 row=0, column=col, sticky="w", padx=(0, 18)
             )
 
-    def _build_control_bar(self, bar: tk.Frame) -> None:
+    def build_control_bar(self, bar: tk.Frame) -> None:
         for label, mode_val, cmd in _MODE_CYCLE:
             var = tk.BooleanVar(value=False)
             self._mode_vars[mode_val] = var
@@ -134,49 +133,28 @@ class EL15App(BaseDeviceApp):
         ttk.Button(bar, text="Set", style="MenuBar.TButton",
                    command=self._on_set_setpoint, padding=6, width=0).pack(side=tk.LEFT)
 
-        self._all_controls: list = [
+        self._all_controls = [
             *self._mode_buttons.values(),
             self._load_btn,
             self._setpoint_entry,
         ]
-        self._set_control_state(False)
+        self.set_control_state(False)
 
-    def _set_control_state(self, enabled: bool) -> None:
+    def set_control_state(self, enabled: bool) -> None:
         state = "!disabled" if enabled else "disabled"
         for widget in self._all_controls:
             widget.state([state])
 
-    def _on_mode_clicked(self, mode_val: int, cmd_prefix: bytes) -> None:
-        for m, var in self._mode_vars.items():
-            var.set(m == mode_val)
-        self._active_mode = mode_val
-        info = MODE_SETPOINT_INFO.get(mode_val, ("A", 3, "Current"))
-        self._setpoint_unit_var.set(info[0])
-        self._send_command_prefix(cmd_prefix)
+    def pre_connect_reset(self) -> None: pass
+    def clear_capture(self) -> None: pass
+    def on_connected(self) -> None: pass
+    def teardown(self) -> None: pass
+    def refresh_status(self, now: float) -> None: pass
 
-    def _on_load_clicked(self) -> None:
-        self._send_command_prefix(CMD_LOAD_ON if self._load_var.get() else CMD_LOAD_OFF)
-
-    def _on_set_setpoint(self, _event=None) -> None:
-        try:
-            value = float(self._setpoint_var.get().strip())
-        except ValueError:
-            show_error(self, "Setpoint", "Enter a valid numeric value.",
-                       theme=(self.ui.theme.bg, self.ui.theme.outline))
-            return
-        self._send_command_prefix(build_set_setpoint_cmd(value))
-
-    def _apply_status_buttons(self, s: EL15Status) -> None:
-        for mode_val, var in self._mode_vars.items():
-            var.set(s.mode == mode_val)
-        self._active_mode = s.mode
-        self._load_var.set(s.load_on)
-        info = MODE_SETPOINT_INFO.get(s.mode, ("A", 3, "Current"))
-        self._setpoint_unit_var.set(info[0])
-
-    def _on_packet_data(self, data: bytes) -> None:
+    def on_packet(self, data: bytes) -> None:
+        app = self.app
         s = parse_status_packet(data)
-        self._append_raw_text(f"RX {s.raw}  CRC:{'PASS' if s.crc_ok else 'FAIL'}\n")
+        app._append_raw_text(f"RX {s.raw}  CRC:{'PASS' if s.crc_ok else 'FAIL'}\n")
 
         if not s.valid:
             return
@@ -201,10 +179,38 @@ class EL15App(BaseDeviceApp):
         self._info_fan_var.set(f"Fan: {s.fan_speed}")
         self._mode_label_var.set(f"{s.mode_name}  {'▶ ON' if s.load_on else '◼ OFF'}")
 
-        self._wave_view.push(s.voltage, pad=0.5, axis_unit="V", axis_mul=1.0, decimals=3)
+        app._wave_view.push(s.voltage, pad=0.5, axis_unit="V", axis_mul=1.0, decimals=3)
 
-        smin, smax, avg = self._push_stats(s.voltage)
-        self._stats_var.set("V  Min %.3f  Max %.3f  Avg %.3f" % (smin, smax, avg))
+        smin, smax, avg = app._push_stats(s.voltage)
+        app._stats_var.set("V  Min %.3f  Max %.3f  Avg %.3f" % (smin, smax, avg))
 
-        if self._is_connected:
-            self._rate_count += 1
+        if app._is_connected:
+            app._rate_count += 1
+
+    def _apply_status_buttons(self, s: EL15Status) -> None:
+        for mode_val, var in self._mode_vars.items():
+            var.set(s.mode == mode_val)
+        self._active_mode = s.mode
+        self._load_var.set(s.load_on)
+        info = MODE_SETPOINT_INFO[s.mode]
+        self._setpoint_unit_var.set(info[0])
+
+    def _on_mode_clicked(self, mode_val: int, cmd_prefix: bytes) -> None:
+        for m, var in self._mode_vars.items():
+            var.set(m == mode_val)
+        self._active_mode = mode_val
+        info = MODE_SETPOINT_INFO.get(mode_val, ("A", 3, "Current"))
+        self._setpoint_unit_var.set(info[0])
+        self.app.send_command(cmd_prefix)
+
+    def _on_load_clicked(self) -> None:
+        self.app.send_command(CMD_LOAD_ON if self._load_var.get() else CMD_LOAD_OFF)
+
+    def _on_set_setpoint(self, _event=None) -> None:
+        try:
+            value = float(self._setpoint_var.get().strip())
+        except ValueError:
+            show_error(self.app, "Setpoint", "Enter a valid numeric value.",
+                       theme=(self.app.ui.theme.bg, self.app.ui.theme.outline))
+            return
+        self.app.send_command(build_set_setpoint_cmd(value))

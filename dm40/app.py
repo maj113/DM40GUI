@@ -1,11 +1,10 @@
-"""DM40 Tkinter application."""
+"""DM40 device handler."""
 import tkinter as tk
 from tkinter import ttk
 
-from shared.base_app import BaseDeviceApp
+from shared.ble_worker import BleWorker
 from GUI.widgets.menubar import MENU_UP, MenuDropdown
 
-from shared.ble_worker import BleWorker
 from .parsing import MODEL, MODEL_TABLE, Measurement, parse_device_status, parse_measurement_for_ui
 from .protocol_constants import (
     CMD_ID,
@@ -38,15 +37,12 @@ def _dm40_notify_filter(data: bytes) -> bool:
     return True
 
 
-class DM40App(BaseDeviceApp):
-    _title_base = "DM40"
-    _csv_prefix = "DM40"
+class DM40Handler:
+    title = "DM40"
+    csv_prefix = "DM40"
 
-    def __init__(self, master: tk.Tk) -> None:
-        super().__init__(master)
-        self.bind_all("<Control-c>", self._copy_reading)
-
-    def _init_device_state(self) -> None:
+    def __init__(self, app) -> None:
+        self.app = app
         self._last_trace_key: int | None = None
         self._last_device_status: tuple = (0, False, False, False)
         self._last_measurement: Measurement | None = None
@@ -59,7 +55,7 @@ class DM40App(BaseDeviceApp):
         self._cycle_groups: dict = {}
         self._last_base_mode_flag: int | None = None
 
-    def _create_worker(self, device, **callbacks):
+    def create_worker(self, device, **callbacks):
         return BleWorker(
             device,
             poll_cmd=CMD_READ,
@@ -69,19 +65,17 @@ class DM40App(BaseDeviceApp):
             **callbacks,
         )
 
-    def _build_menubar_labels(self, menubar) -> None:
+    def build_menubar_labels(self, pre: tk.Frame, post: tk.Frame) -> None:
         self._model_var = tk.StringVar(value=MODEL.model_name)
         tk.Label(
-            menubar, textvariable=self._model_var, font=("Segoe UI", 11, "bold")
-        ).grid(row=0, column=3, sticky="e")
+            pre, textvariable=self._model_var, font=("Segoe UI", 11, "bold")
+        ).pack(side="left")
         self._icons_var = tk.StringVar(value="")
-        tk.Label(menubar, textvariable=self._icons_var).grid(
-            row=0, column=5, sticky="e"
-        )
-        self._battery_label = tk.Label(menubar, text="", font=("Consolas", 10))
-        self._battery_label.grid(row=0, column=6, sticky="e", padx=(0, 8))
+        tk.Label(post, textvariable=self._icons_var).pack(side="left")
+        self._battery_label = tk.Label(post, text="", font=("Consolas", 10))
+        self._battery_label.pack(side="left", padx=(0, 8))
 
-    def _build_reading_area(self, parent: tk.Frame) -> None:
+    def build_reading_area(self, parent: tk.Frame) -> None:
         parent.columnconfigure(0, weight=0)
         parent.columnconfigure(1, weight=1)
 
@@ -119,7 +113,7 @@ class DM40App(BaseDeviceApp):
             anchor="e",
         ).pack(side="right")
 
-    def _build_control_bar(self, bar: tk.Frame) -> None:
+    def build_control_bar(self, bar: tk.Frame) -> None:
         self._range_button = ttk.Button(
             bar,
             text="Range",
@@ -133,7 +127,7 @@ class DM40App(BaseDeviceApp):
         for label, cmd in MOMENTARY_COMMANDS:
             btn = ttk.Button(
                 bar, text=label, style="MenuBar.TButton",
-                command=lambda c=cmd: self._send_command_prefix(c), padding=6, width=0,
+                command=lambda c=cmd: self.app.send_command(c), padding=6, width=0,
             )
             btn.pack(side=tk.LEFT, padx=(0, 6))
             self._mode_buttons.append(btn)
@@ -175,9 +169,11 @@ class DM40App(BaseDeviceApp):
         for key, options in COMMAND_CYCLE_GROUPS:
             add_cycle_group("command", key, options)
 
-        self._set_control_state(False)
+        self.set_control_state(False)
 
-    def _set_control_state(self, enabled: bool) -> None:
+        self.app.bind_all("<Control-c>", self._copy_reading)
+
+    def set_control_state(self, enabled: bool) -> None:
         state = "!disabled" if enabled else "disabled"
         for btn in self._mode_buttons:
             btn.state([state])
@@ -187,16 +183,19 @@ class DM40App(BaseDeviceApp):
             self._range_menu.destroy()
             self._range_menu = None
 
-    def _pre_connect_reset(self) -> None:
+    def pre_connect_reset(self) -> None:
         self._last_trace_key = None
 
-    def _clear_capture_extra(self) -> None:
+    def clear_capture(self) -> None:
         self._last_trace_key = None
 
-    def _on_connected_extra(self) -> None:
+    def on_connected(self) -> None:
         self._model_var.set(MODEL.model_name)
 
-    def _refresh_device_status_extra(self, now: float) -> None:
+    def teardown(self) -> None:
+        self.app.unbind_all("<Control-c>")
+
+    def refresh_status(self, now: float) -> None:
         status = self._last_device_status
         self._icons_var.set(
             ("⚡" if status[1] else "") +
@@ -204,11 +203,54 @@ class DM40App(BaseDeviceApp):
             ("✋" if status[3] else "")
         )
         charging = status[1]
-        target_fg = "#00ff00" if charging else self.option_get("foreground", ".")
+        target_fg = "#00ff00" if charging else self.app.option_get("foreground", ".")
         if self._battery_label.cget("foreground") != target_fg:
             self._battery_label.configure(foreground=target_fg)
         segments = max(0, min(5, int(status[0])))
         self._battery_label.configure(text="█" * segments + "░" * (5 - segments))
+
+    def on_packet(self, data: bytes) -> None:
+        app = self.app
+        m = parse_measurement_for_ui(data)
+        app._append_raw_text(f"RX {m.raw}  CRC:{'PASS' if m.crc_ok else 'FAIL'}\n")
+
+        if m.kind == "---":
+            return
+
+        self._last_device_status = parse_device_status(data)
+        self._last_measurement = m
+        self._apply_meter_state()
+
+        trace_key = data[5]
+        if self._last_trace_key is not None and trace_key != self._last_trace_key:
+            app._wave_view.clear()
+            app._stats_count = 0
+        self._last_trace_key = trace_key
+
+        self._mode_var.set(f"{m.kind} {m.range}" if m.range else m.kind)
+        unit = f" {m.display_unit}" if m.display_unit else ""
+        self._value_label.configure(text=f" {m.value_str}{unit}")
+
+        third = f"{m.third_val} {m.third_unit}".strip() if m.third_val else ""
+        sec = f"{m.sec_val} {m.sec_unit}".strip() if m.sec_val else ""
+        self._aux1_var.set(sec)
+        self._aux2_var.set(third)
+
+        mul = UNIT_TO_BASE[m.display_unit]
+        if not m.overload and m.norm_value is not None:
+            app._wave_view.push(
+                m.norm_value, pad=m.vertical_pad, axis_unit=m.display_unit,
+                axis_mul=mul, decimals=m.decimals,
+            )
+            smin, smax, avg = app._push_stats(m.norm_value)
+            d = m.decimals
+            app._stats_var.set(
+                "Min %.*f  Max %.*f  Avg %.*f%s"
+                % (d, smin / mul, d, smax / mul, d, avg / mul, unit)
+            )
+
+        if app._is_connected:
+            app._rate_count += 1
 
     def _apply_meter_state(self) -> None:
         m = self._last_measurement
@@ -254,7 +296,7 @@ class DM40App(BaseDeviceApp):
             current_index = (current_index + 1) % len(options)
         value = options[current_index][1]
         if isinstance(value, bytes):
-            self._send_command_prefix(value)
+            self.app.send_command(value)
         elif group["kind"] == "range" and isinstance(value, int):
             self._send_range_flag(value)
         self._apply_meter_state()
@@ -265,19 +307,19 @@ class DM40App(BaseDeviceApp):
         if key == "CAP":
             self._toggle_vars[key].set(True)
             if cmd_on:
-                self._send_command_prefix(cmd_on)
+                self.app.send_command(cmd_on)
         elif is_on and cmd_on:
-            self._send_command_prefix(cmd_on)
+            self.app.send_command(cmd_on)
         elif not is_on:
             if cmd_off:
-                self._send_command_prefix(cmd_off)
+                self.app.send_command(cmd_off)
             elif self._last_base_mode_flag is not None:
                 self._send_range_flag(self._last_base_mode_flag)
         self._apply_meter_state()
 
     def _send_range_flag(self, flag: int) -> None:
         self._last_base_mode_flag = flag
-        self._send_command_prefix(b"\xaf\x05\x03\x06\x01%c" % flag)
+        self.app.send_command(b"\xaf\x05\x03\x06\x01%c" % flag)
 
     def _get_active_range_kind(self) -> str | None:
         if self._last_measurement:
@@ -303,9 +345,8 @@ class DM40App(BaseDeviceApp):
             return
         btn = self._range_button
         active_kind = self._get_active_range_kind()
-        root = self.winfo_toplevel()
         self._range_menu = MenuDropdown(
-            root,
+            self.app,
             self._build_range_items(active_kind),
             on_destroy=lambda: setattr(self, "_range_menu", None),
             owner_widget=btn,
@@ -313,54 +354,12 @@ class DM40App(BaseDeviceApp):
         )
 
     def _copy_reading(self, _event=None) -> None:
-        source = _event.widget if _event is not None else self.focus_get()
+        source = _event.widget if _event is not None else self.app.focus_get()
         if isinstance(source, (tk.Text, tk.Entry, ttk.Entry)):
             return
         m = self._last_measurement
         if not m or m.kind == "---":
             return
         unit = f" {m.display_unit}" if m.display_unit else ""
-        self.clipboard_clear()
-        self.clipboard_append(f"{m.value_str}{unit}")
-
-    def _on_packet_data(self, data: bytes) -> None:
-        m = parse_measurement_for_ui(data)
-        self._append_raw_text(f"RX {m.raw}  CRC:{'PASS' if m.crc_ok else 'FAIL'}\n")
-
-        if m.kind == "---":
-            return
-
-        self._last_device_status = parse_device_status(data)
-        self._last_measurement = m
-        self._apply_meter_state()
-
-        trace_key = data[5]
-        if self._last_trace_key is not None and trace_key != self._last_trace_key:
-            self._wave_view.clear()
-            self._stats_count = 0
-        self._last_trace_key = trace_key
-
-        self._mode_var.set(f"{m.kind} {m.range}" if m.range else m.kind)
-        unit = f" {m.display_unit}" if m.display_unit else ""
-        self._value_label.configure(text=f" {m.value_str}{unit}")
-
-        third = f"{m.third_val} {m.third_unit}".strip() if m.third_val else ""
-        sec = f"{m.sec_val} {m.sec_unit}".strip() if m.sec_val else ""
-        self._aux1_var.set(sec)
-        self._aux2_var.set(third)
-
-        mul = UNIT_TO_BASE.get(m.display_unit, 1.0)
-        if not m.overload and m.norm_value is not None:
-            self._wave_view.push(
-                m.norm_value, pad=m.vertical_pad, axis_unit=m.display_unit,
-                axis_mul=mul, decimals=m.decimals,
-            )
-            smin, smax, avg = self._push_stats(m.norm_value)
-            d = m.decimals
-            self._stats_var.set(
-                "Min %.*f  Max %.*f  Avg %.*f%s"
-                % (d, smin / mul, d, smax / mul, d, avg / mul, unit)
-            )
-
-        if self._is_connected:
-            self._rate_count += 1
+        self.app.clipboard_clear()
+        self.app.clipboard_append(f"{m.value_str}{unit}")

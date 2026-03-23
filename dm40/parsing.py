@@ -51,37 +51,21 @@ class Measurement:
         "crc_ok",
     )
 
-    def __init__(
-        self,
-        raw="",
-        kind="---",
-        range=None,
-        display_unit="",
-        value_str="---",
-        norm_value=None,
-        vertical_pad=0.0,
-        decimals=2,
-        sec_val=None,
-        sec_unit="",
-        third_val=None,
-        third_unit="",
-        overload=False,
-        crc_ok=False,
-    ):
-        self.raw = raw
-        self.kind = kind
-        self.range = range
-        self.display_unit = display_unit
-        self.value_str = value_str
-        self.norm_value = norm_value
-        self.vertical_pad = vertical_pad
-        self.decimals = decimals
-        self.sec_val = sec_val
-        self.sec_unit = sec_unit
-        self.third_val = third_val
-        self.third_unit = third_unit
-        self.overload = overload
-        self.crc_ok = crc_ok
+    def __init__(self):
+        self.raw = ""
+        self.kind = "---"
+        self.range = ""
+        self.display_unit = ""
+        self.value_str = "---"
+        self.norm_value = None  # type: ignore[assignment]
+        self.vertical_pad = 0.0
+        self.decimals = 2
+        self.sec_val = ""
+        self.sec_unit = ""
+        self.third_val = ""
+        self.third_unit = ""
+        self.overload = False
+        self.crc_ok = False
 
 
 MODEL_TABLE = (("DM40A", 40000), ("DM40B", 50000), ("DM40C", 60000))
@@ -146,7 +130,8 @@ def process_slot(slot_type: str, counts: int, sign_flag: int, kind: str):
     return "", ""
 
 def parse_measurement_for_ui(data: bytes) -> Measurement:
-    m = Measurement(raw=data.hex(" ").upper())
+    m = Measurement()
+    m.raw = data.hex(" ").upper()
     m.crc_ok = ((sum(data) & 0xFF) == 0) if data else False
     if len(data) < 16 or not data.startswith(HEADER):
         return m
@@ -174,8 +159,8 @@ def parse_measurement_for_ui(data: bytes) -> Measurement:
 
     if not m.overload:
         sign = -1 if (s0 & 0x01) else 1
-        m.norm_value = sign * m1 * (fs1 / eff_counts)
-        m.value_str = "%.*f" % (dec1, m.norm_value * mul1)
+        m.norm_value = sign * m1 * (fs1 / eff_counts)  # type: ignore[assignment]
+        m.value_str = "%.*f" % (dec1, m.norm_value * mul1)  # type: ignore[operator]
 
     if not rng_name.startswith("AUTO"):
         m.range = f"{(fs1 * mul1):.4g}{unit1}"

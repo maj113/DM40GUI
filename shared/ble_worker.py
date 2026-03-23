@@ -45,7 +45,7 @@ async def _probe(device, timeout, result):
         deadline_handle.cancel()
 
         for r in responses:
-            if len(r) >= 7 and r[:4] == _DISCOVERY_HEADER:
+            if r.startswith(_DISCOVERY_HEADER) and len(r) >= 7:
                 family = _FAMILY_MAP.get(r[5:7])
                 if family:
                     result[0] = family
