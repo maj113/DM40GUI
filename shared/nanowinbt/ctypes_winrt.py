@@ -227,6 +227,7 @@ _ARG_UINT32_OUT_VOIDP = (_c_uint32, _PPVOID)
 _ARG_UINT64_OUT_VOIDP = (_c_uint64, _PPVOID)
 _ARG_CINT_OUT_VOIDP = (_c_int, _PPVOID)
 _ARG_GUID_OUT_VOIDP = (GUID, _PPVOID)
+_ARG_GUID_CINT_OUT_VOIDP = (GUID, _c_int, _PPVOID)
 _ARG_VOIDP_OUT_VOIDP = (_c_void_p, _PPVOID)
 _ARG_VOIDP_CINT_OUT_VOIDP = (_c_void_p, _c_int, _PPVOID)
 _ARG_EVENT_TOKEN = (EventRegistrationToken,)
@@ -390,10 +391,10 @@ def btle_device6_request_throughput_params(device_ptr: ctypes.c_void_p) -> None:
         release_ptr(d6)
 
 
-def btle_device3_get_gatt_services_for_uuid_async(ptr, service_uuid):  # IBluetoothLEDevice3::GetGattServicesForUuidAsync [10]
+def btle_device3_get_gatt_services_for_uuid_async(ptr, service_uuid):  # IBluetoothLEDevice3::GetGattServicesForUuidWithCacheModeAsync [11]
     op = _c_void_p()
-    hr = _vtbl_invoke(ptr, 10, _c_long, _ARG_GUID_OUT_VOIDP, service_uuid, _byref(op))
-    _check_hresult(hr, "BTLEDevice3.GetGattServicesForUuidAsync")
+    hr = _vtbl_invoke(ptr, 11, _c_long, _ARG_GUID_CINT_OUT_VOIDP, service_uuid, _c_int(1), _byref(op))
+    _check_hresult(hr, "BTLEDevice3.GetGattServicesForUuidWithCacheModeAsync")
     return op
 
 
