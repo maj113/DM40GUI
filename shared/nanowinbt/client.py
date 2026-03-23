@@ -85,15 +85,41 @@ class NanoClient:
         ptrs = []
         try:
             device3 = device.query_interface(w.IID_BLUETOOTH_LE_DEVICE3); ptrs.append(device3)
-            services_result_ptr = await _await_ptr(
-                w.btle_device3_get_gatt_services_for_uuid_async(device3.ptr, target_service),
-                w.IID_ASYNC_COMPLETED_HANDLER_GATT_DEVICE_SERVICES_RESULT,
-                3.5,
-                "client.prime.services",
-            )
-            services_result = w.ComPtr(services_result_ptr); ptrs.append(services_result)
-            if w.gatt_services_result_get_status(services_result.ptr) != 0:
-                raise NanoClientError("GATT service query failed")
+            for attempt in range(3):
+                if attempt:
+                    _delay = asyncio.Event()
+                    asyncio.get_running_loop().call_later(0.8, _delay.set)
+                    await _delay.wait()
+                services_result_ptr = await _await_ptr(
+                    w.btle_device3_get_gatt_services_for_uuid_async(device3.ptr, target_service),
+                    w.IID_ASYNC_COMPLETED_HANDLER_GATT_DEVICE_SERVICES_RESULT,
+                    5.0,
+                    "client.prime.services",
+                )
+                services_result = w.ComPtr(services_result_ptr); ptrs.append(services_result)
+                svc_status = w.gatt_services_result_get_status(services_result.ptr)
+                if svc_status == 0:
+                    break
+                services_result.release()
+                ptrs.pop()
+            else:
+                _STATUS_NAMES = {0: "Success", 1: "Unreachable", 2: "ProtocolError", 3: "AccessDenied"}
+                conn_status = w.btle_device_get_connection_status(device.ptr)
+                msg = (
+                    f"GATT service query failed after {attempt + 1} attempts\n"
+                    f"  status={svc_status} ({_STATUS_NAMES.get(svc_status, 'Unknown')})\n"
+                    f"  service_uuid={service_uuid}\n"
+                    f"  target_service_guid={bytes(target_service).hex()}\n"
+                    f"  device_ptr={device.ptr}\n"
+                    f"  device3_ptr={device3.ptr}\n"
+                    f"  connection_status={conn_status} ({'Connected' if conn_status == 1 else 'Disconnected'})\n"
+                    f"  bt_address={self._target.bluetooth_address:#x}\n"
+                    f"  char_uuids={char_uuids}\n"
+                    f"  missing={missing}\n"
+                    f"  write_buffer_size={write_buffer_size}"
+                )
+                print(msg)
+                raise NanoClientError(msg)
             services_view = w.ComPtr(w.gatt_services_result_get_services(services_result.ptr)); ptrs.append(services_view)
             if w.vector_view_get_size(services_view.ptr) == 0:
                 raise NanoClientError(f"Service not found: {service_uuid}")
@@ -131,9 +157,8 @@ class NanoClient:
 
     async def write_gatt_char(self, char_uuid: str, data) -> None:
         char = self._require_char(char_uuid)
-        payload = data if isinstance(data, bytes) else bytes(data)
-        ctypes.memmove(self._write_buffer_data_ptr, payload, len(payload))  # type: ignore[arg-type]
-        w.buffer_set_length(self._write_buffer_ptr, len(payload))
+        ctypes.memmove(self._write_buffer_data_ptr, data, len(data))  # type: ignore[arg-type]
+        w.buffer_set_length(self._write_buffer_ptr, len(data))
         await _await_ptr(
             w.gatt_characteristic_write_value_with_option_async(
                 char.ptr,
@@ -186,17 +211,16 @@ class NanoClient:
         if token_entry is None:
             return
 
-        char = token_entry[0]
         await _await_ptr(
-            w.gatt_characteristic_write_cccd_async(char.ptr, w.GATT_CCCD_NONE),
+            w.gatt_characteristic_write_cccd_async(token_entry[0].ptr, w.GATT_CCCD_NONE),
             w.IID_ASYNC_COMPLETED_HANDLER_GATT_COMM_STATUS,
             self._timeout,
             "client.notify.stop",
             get_results=False,
         )
 
-        self._notify_tokens.pop(char_uuid, None)
-        w.gatt_characteristic_remove_value_changed(char.ptr, token_entry[1])
+        del self._notify_tokens[char_uuid]
+        w.gatt_characteristic_remove_value_changed(token_entry[0].ptr, token_entry[1])
 
     def _register_disconnect_handler(self) -> None:
         if self._device is None:
