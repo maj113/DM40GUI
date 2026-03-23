@@ -10,6 +10,52 @@ _SERVICE_UUID = "0000fff0-0000-1000-8000-00805f9b34fb"
 _NOTIFY_UUID  = "0000fff1-0000-1000-8000-00805f9b34fb"
 _WRITE_UUID   = "0000fff3-0000-1000-8000-00805f9b34fb"
 
+_CMD_DISCOVERY = b"\xaf\xff\xff\x00\x00\x53"
+_DISCOVERY_HEADER = b"\xdf\xff\xff\x00"
+_FAMILY_MAP = {b"\x05\x03": "DM40", b"\x07\x03": "EL15"}
+
+
+def probe_device_type(device, timeout: float = 6.0) -> str | None:
+    """Connect, send discovery command, return 'DM40'/'EL15' or None.
+    Blocking — call from a background thread."""
+    result = [None]
+    try:
+        asyncio.run(_probe(device, timeout, result))
+    except Exception:
+        pass
+    return result[0]
+
+
+async def _probe(device, timeout, result):
+    responses = []
+    loop = asyncio.get_running_loop()
+    got = asyncio.Event()
+
+    def on_notify(data: bytes):
+        responses.append(data)
+        loop.call_soon_threadsafe(got.set)
+
+    async with NanoClient(device, timeout=timeout) as client:
+        await client.prime_gatt(_SERVICE_UUID, [_NOTIFY_UUID, _WRITE_UUID], 8)
+        await client.start_notify(_NOTIFY_UUID, on_notify)
+        await client.write_gatt_char(_WRITE_UUID, _CMD_DISCOVERY)
+
+        deadline_handle = loop.call_later(3.0, got.set)
+        await got.wait()
+        deadline_handle.cancel()
+
+        for r in responses:
+            if len(r) >= 7 and r[:4] == _DISCOVERY_HEADER:
+                family = _FAMILY_MAP.get(r[5:7])
+                if family:
+                    result[0] = family
+                    break
+
+        try:
+            await client.stop_notify(_NOTIFY_UUID)
+        except Exception:
+            pass
+
 
 class BleWorker:
     __slots__ = (

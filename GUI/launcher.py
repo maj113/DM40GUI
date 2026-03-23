@@ -5,6 +5,7 @@ from tkinter import ttk
 
 from shared import mini_asyncio as asyncio
 from shared.nanowinbt.scanner import NanoScanner
+from shared.ble_worker import probe_device_type
 from GUI.controls import UIControls
 from GUI.theme_manager import ThemeManager
 from GUI.themed_messagebox import show_error
@@ -12,17 +13,13 @@ from GUI.widgets.helpers import theme_title_bar
 from GUI.widgets.menubar import OwnerDrawnMenuBar
 from GUI.widgets.themed_button import ThemedButton
 
-_NAME_HINTS = {
-    "DM40": "DM40",
-    "EL15": "EL15",
-    "ATK":  "EL15",   # Alientek OEM name used on EL15
-}
+_DEVICE_TYPES = ("DM40", "EL15")
 
 
 def _guess_device_type(device) -> str | None:
     name = (device.name or "").upper()
-    for prefix, dtype in _NAME_HINTS.items():
-        if name.startswith(prefix):
+    for dtype in _DEVICE_TYPES:
+        if name.startswith(dtype):
             return dtype
     return None
 
@@ -191,7 +188,26 @@ class LauncherWindow(tk.Toplevel):
                        theme=(self.ui.theme.bg, self.ui.theme.outline))
             return
         device = self._devices[sel[0]]
-        self._on_connect_cb(device, _guess_device_type(device))
+        dtype = _guess_device_type(device)
+        if dtype is not None:
+            self._on_connect_cb(device, dtype)
+            return
+        self._status_var.set("Identifying device …")
+        _thread.start_new_thread(self._probe_worker, (device,))
+
+    def _probe_worker(self, device) -> None:
+        dtype = probe_device_type(device)
+        self.after(0, self._probe_done, device, dtype)
+
+    def _probe_done(self, device, dtype) -> None:
+        if dtype is not None:
+            self._status_var.set(f"Identified as {dtype}")
+            self._on_connect_cb(device, dtype)
+        else:
+            self._status_var.set("Could not identify device")
+            show_error(self, "Identify",
+                       f"'{device.name or device.address}' did not respond to discovery probe.",
+                       theme=(self.ui.theme.bg, self.ui.theme.outline))
 
     def _on_close(self) -> None:
         self.master.destroy()
