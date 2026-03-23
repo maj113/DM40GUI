@@ -4,14 +4,13 @@ from .. import mini_asyncio as asyncio
 from . import ctypes_winrt as w
 from .ctypes_com import RoSession
 from .scanner import _await_ptr
-from dm40.types import NanoBLEDevice
 
 class NanoClientError(RuntimeError):
     pass
 
 
 class NanoClient:
-    def __init__(self, connect_target: NanoBLEDevice, disconnected_callback=None, *, timeout: float = 30.0):
+    def __init__(self, connect_target, disconnected_callback=None, *, timeout: float = 30.0):
         self._target = connect_target
         self._disconnected_callback = disconnected_callback
         self._timeout = timeout
@@ -23,8 +22,8 @@ class NanoClient:
         self._status_token = None
         self._status_delegate = None
         self._write_buffer: w.ComPtr | None = None
+        self._write_buffer_ptr = None
         self._write_buffer_data_ptr = None
-        self._write_buffer_capacity = 0
 
     async def __aenter__(self):
         await self.connect()
@@ -64,7 +63,7 @@ class NanoClient:
             statics.release()
 
         if not device_ptr:
-            raise NanoClientError(f"Device not found for address: {bt_addr:#x}")
+            raise NanoClientError("Device not found for address: %#x" % bt_addr)
         self._device = w.ComPtr(device_ptr)
         w.btle_device6_request_throughput_params(device_ptr)
         self._register_disconnect_handler()
@@ -73,8 +72,7 @@ class NanoClient:
         self._unregister_disconnect_handler()
         self._release_all()
 
-    async def prime_gatt(self, service_uuid: str, char_uuids: list[str]) -> None:
-        """Discover service and resolve all characteristics in one async call."""
+    async def prime_gatt(self, service_uuid: str, char_uuids: list[str], write_buffer_size: int) -> None:
         device = self._device
         if device is None:
             raise NanoClientError("Not connected")
@@ -87,22 +85,47 @@ class NanoClient:
         ptrs = []
         try:
             device3 = device.query_interface(w.IID_BLUETOOTH_LE_DEVICE3); ptrs.append(device3)
-            services_result_ptr = await _await_ptr(
-                w.btle_device3_get_gatt_services_for_uuid_async(device3.ptr, target_service),
-                w.IID_ASYNC_COMPLETED_HANDLER_GATT_DEVICE_SERVICES_RESULT,
-                3.5,
-                "client.prime.services",
-            )
-            services_result = w.ComPtr(services_result_ptr); ptrs.append(services_result)
-            if w.gatt_services_result_get_status(services_result.ptr) != 0:
-                raise NanoClientError("GATT service query failed")
+            for attempt in range(3):
+                if attempt:
+                    _delay = asyncio.Event()
+                    asyncio.get_running_loop().call_later(0.8, _delay.set)
+                    await _delay.wait()
+                services_result_ptr = await _await_ptr(
+                    w.btle_device3_get_gatt_services_for_uuid_async(device3.ptr, target_service),
+                    w.IID_ASYNC_COMPLETED_HANDLER_GATT_DEVICE_SERVICES_RESULT,
+                    5.0,
+                    "client.prime.services",
+                )
+                services_result = w.ComPtr(services_result_ptr); ptrs.append(services_result)
+                svc_status = w.gatt_services_result_get_status(services_result.ptr)
+                if svc_status == 0:
+                    break
+                services_result.release()
+                ptrs.pop()
+            else:
+                _STATUS_NAMES = {0: "Success", 1: "Unreachable", 2: "ProtocolError", 3: "AccessDenied"}
+                conn_status = w.btle_device_get_connection_status(device.ptr)
+                msg = (
+                    f"GATT service query failed after {attempt + 1} attempts\n"
+                    f"  status={svc_status} ({_STATUS_NAMES.get(svc_status, 'Unknown')})\n"
+                    f"  service_uuid={service_uuid}\n"
+                    f"  target_service_guid={bytes(target_service).hex()}\n"
+                    f"  device_ptr={device.ptr}\n"
+                    f"  device3_ptr={device3.ptr}\n"
+                    f"  connection_status={conn_status} ({'Connected' if conn_status == 1 else 'Disconnected'})\n"
+                    f"  bt_address={self._target.bluetooth_address:#x}\n"
+                    f"  char_uuids={char_uuids}\n"
+                    f"  missing={missing}\n"
+                    f"  write_buffer_size={write_buffer_size}"
+                )
+                print(msg)
+                raise NanoClientError(msg)
             services_view = w.ComPtr(w.gatt_services_result_get_services(services_result.ptr)); ptrs.append(services_view)
             if w.vector_view_get_size(services_view.ptr) == 0:
                 raise NanoClientError(f"Service not found: {service_uuid}")
             service = w.ComPtr(w.vector_view_get_at(services_view.ptr, 0)); ptrs.append(service)
             service3 = service.query_interface(w.IID_GATT_DEVICE_SERVICE3); ptrs.append(service3)
 
-            # Single call to get ALL characteristics, then match by UUID in Python
             chars_result_ptr = await _await_ptr(
                 w.gatt_service3_get_characteristics_async(service3.ptr),
                 w.IID_ASYNC_COMPLETED_HANDLER_GATT_CHARACTERISTICS_RESULT,
@@ -114,7 +137,7 @@ class NanoClient:
                 raise NanoClientError("Characteristic query failed")
             chars_view = w.ComPtr(w.gatt_characteristics_result_get_characteristics(chars_result.ptr)); ptrs.append(chars_view)
             count = w.vector_view_get_size(chars_view.ptr)
-            targets = {bytes(w._guid(u)): u for u in missing}
+            targets = {w._bguid(u): u for u in missing}
             for i in range(count):
                 cp = w.vector_view_get_at(chars_view.ptr, i)
                 matched = targets.pop(bytes(w.gatt_characteristic_get_uuid(cp)), None)
@@ -128,19 +151,18 @@ class NanoClient:
             for p in reversed(ptrs):
                 p.release()
 
-        # Pre-create write buffer (avoids RoGetActivationFactory on first write)
-        self._get_or_grow_write_buffer(20)
+        self._write_buffer = w.ComPtr(w.buffer_factory_create(write_buffer_size))
+        self._write_buffer_ptr = self._write_buffer.ptr
+        self._write_buffer_data_ptr = w.buffer_get_data_ptr(self._write_buffer_ptr)
 
     async def write_gatt_char(self, char_uuid: str, data) -> None:
         char = self._require_char(char_uuid)
-        payload = data if isinstance(data, bytes) else bytes(data)
-        buf = self._get_or_grow_write_buffer(len(payload))
-        ctypes.memmove(self._write_buffer_data_ptr, payload, len(payload))  # type: ignore[arg-type]
-        w.buffer_set_length(buf.ptr, len(payload))
+        ctypes.memmove(self._write_buffer_data_ptr, data, len(data))  # type: ignore[arg-type]
+        w.buffer_set_length(self._write_buffer_ptr, len(data))
         await _await_ptr(
             w.gatt_characteristic_write_value_with_option_async(
                 char.ptr,
-                buf.ptr,
+                self._write_buffer_ptr,
                 w.GATT_WRITE_OPTION_WITHOUT_RESPONSE,
             ),
             w.IID_ASYNC_COMPLETED_HANDLER_GATT_COMM_STATUS,
@@ -148,21 +170,6 @@ class NanoClient:
             "client.write",
             get_results=False,
         )
-
-    def _get_or_grow_write_buffer(self, needed: int) -> w.ComPtr:
-        current = self._write_buffer
-        if current is not None and self._write_buffer_capacity >= needed:
-            return current
-        if current is not None:
-            try:
-                current.release()
-            except Exception:
-                pass
-        capacity = needed if needed > 0 else 1
-        self._write_buffer = w.ComPtr(w.buffer_factory_create(capacity))
-        self._write_buffer_capacity = capacity
-        self._write_buffer_data_ptr = w.buffer_get_data_ptr(self._write_buffer.ptr)
-        return self._write_buffer
 
     async def start_notify(self, char_uuid: str, callback) -> None:
         char = self._require_char(char_uuid)
@@ -204,17 +211,16 @@ class NanoClient:
         if token_entry is None:
             return
 
-        char = token_entry[0]
         await _await_ptr(
-            w.gatt_characteristic_write_cccd_async(char.ptr, w.GATT_CCCD_NONE),
+            w.gatt_characteristic_write_cccd_async(token_entry[0].ptr, w.GATT_CCCD_NONE),
             w.IID_ASYNC_COMPLETED_HANDLER_GATT_COMM_STATUS,
             self._timeout,
             "client.notify.stop",
             get_results=False,
         )
 
-        self._notify_tokens.pop(char_uuid, None)
-        w.gatt_characteristic_remove_value_changed(char.ptr, token_entry[1])
+        del self._notify_tokens[char_uuid]
+        w.gatt_characteristic_remove_value_changed(token_entry[0].ptr, token_entry[1])
 
     def _register_disconnect_handler(self) -> None:
         if self._device is None:
@@ -248,8 +254,8 @@ class NanoClient:
             try: self._write_buffer.release()
             except Exception: pass
         self._write_buffer = None
+        self._write_buffer_ptr = None
         self._write_buffer_data_ptr = None
-        self._write_buffer_capacity = 0
 
         for char, token, _delegate in self._notify_tokens.values():
             try: w.gatt_characteristic_remove_value_changed(char.ptr, token)

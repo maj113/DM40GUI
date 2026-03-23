@@ -1,8 +1,8 @@
 from .. import mini_asyncio as asyncio
-from . import ctypes_winrt as w
+from ..nanowinbt import ctypes_winrt as w
 from .ctypes_com import RoSession
 from .radio import ensure_bluetooth_radio_on, get_bluetooth_radio_state
-from dm40.types import NanoBLEDevice
+from shared.types import NanoBLEDevice
 
 
 class NanoScanner:

@@ -1,8 +1,5 @@
 """Protocol constants and command maps for DM40."""
 
-NOTIFY_UUID = "0000fff1-0000-1000-8000-00805f9b34fb"
-WRITE_UUID = "0000fff3-0000-1000-8000-00805f9b34fb"
-SERVICE_UUID = "0000fff0-0000-1000-8000-00805f9b34fb"
 CMD_ID = b"\xaf\x05\x03\x08\x00\x41"
 CMD_READ = b"\xaf\x05\x03\x09\x00\x40"
 HEADER = b"\xdf\x05\x03\x09"
@@ -212,7 +209,6 @@ CAP_SCALE_MAP = {
 }
 
 UNIT_TO_BASE = {
-    "uV": 1e-6,
     "mV": 1e-3,
     "V": 1.0,
     "uA": 1e-6,
@@ -226,7 +222,6 @@ UNIT_TO_BASE = {
     "nF": 1e-9,
     "uF": 1e-6,
     "mF": 1e-3,
-    "F": 1.0,
     "°C": 1.0,
     "°F": 1.0,
     "%": 1.0,
@@ -235,10 +230,10 @@ UNIT_TO_BASE = {
 MODE_SLOT_MAP = {
     "VDC": ("M1",),
     "VAC": ("M1", "DUTY", "FREQ"),
-    "VDC+AC": ("COMB", "DC", "AC"),
+    "VDC+AC": ("M1", "DC", "AC"),
     "ADC": ("M1",),
     "AAC": ("M1", "DUTY", "FREQ"),
-    "ADC+AC": ("COMB", "DC", "AC"),
+    "ADC+AC": ("M1", "DC", "AC"),
     "RES": ("M1",),
     "RES_ONLINE": ("M1",),
     "CAP": ("M1",),

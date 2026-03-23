@@ -85,7 +85,7 @@ class Tooltip:
         )
         self._label.pack(fill=tk.BOTH, expand=True)
         try:
-            self._tip.wm_geometry(f"+{x}+{y}")
+            self._tip.wm_geometry('+%s+%s' % (x, y))
         except tk.TclError:
             pass
         self._current_text = text
@@ -97,7 +97,7 @@ class Tooltip:
             if self._last_xy == xy:
                 return
             try:
-                self._tip.wm_geometry(f"+{x}+{y}")
+                self._tip.wm_geometry('+%s+%s' % (x, y))
             except tk.TclError:
                 pass
             self._last_xy = xy

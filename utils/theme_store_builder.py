@@ -60,7 +60,7 @@ def serialize_theme_store(themes: list[tuple[str, ...]]) -> bytes:
 
 def main() -> None:
     try:
-        from dm40.theme_store import deserialize_theme_store_palettes
+        from shared.theme_store import deserialize_theme_store_palettes
     except ModuleNotFoundError as exc:
         if __package__ in (None, ""):
             raise SystemExit(

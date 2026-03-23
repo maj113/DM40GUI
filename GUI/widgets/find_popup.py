@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk
 
-from dm40.types import ThemePalette
+
 
 
 class FindPopup:
@@ -15,7 +15,7 @@ class FindPopup:
         self,
         parent: tk.Misc,
         text: tk.Text,
-        colors: ThemePalette,
+        colors,
         *,
         grid_opts: dict | None = None,
     ):
@@ -69,7 +69,7 @@ class FindPopup:
         self.set_tag_colors(self._colors)
         self.hide(clear=False)
 
-    def set_tag_colors(self, colors: ThemePalette) -> None:
+    def set_tag_colors(self, colors) -> None:
         self._colors = colors
         text_fg = colors.text
         match_bg = colors.outline

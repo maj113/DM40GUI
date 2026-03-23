@@ -29,11 +29,6 @@ class int32(ctypes._SimpleCData):
 _DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = intptr_t(-4)
 
 
-def _hex_to_rgb(value):
-    b = bytes.fromhex(value[1:])
-    return b[0], b[1], b[2]
-
-
 def _set_window_attribute(hwnd, attribute, value):
     if not hwnd:
         return False
@@ -45,9 +40,8 @@ def _set_window_attribute(hwnd, attribute, value):
     return True
 
 
-def _colorref_from_hex(value):
-    r, g, b = _hex_to_rgb(value)
-    return (b << 16) | (g << 8) | r
+def _colorref_from_hex(value, _bf=bytes.fromhex, _ifb=int.from_bytes):
+    return _ifb(_bf(value[1:]), 'little')
 
 
 def theme_title_bar(window: tk.Tk | tk.Toplevel, *, border_color: str | None = None,

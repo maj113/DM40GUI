@@ -137,7 +137,7 @@ class _ThemedDialog(tk.Toplevel):
         h = target_h if target_h else self.winfo_height()
         x = parent_x + (parent_w - w) // 2
         y = parent_y + (parent_h - h) // 2
-        self.geometry(f"{w}x{h}+{x}+{y}")
+        self.geometry("%dx%d+%d+%d" % (w, h, x, y))
 
     def _finish(self, value):
         self._result = value
