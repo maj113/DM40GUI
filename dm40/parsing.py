@@ -89,24 +89,29 @@ MODEL_TABLE = (("DM40A", 40000), ("DM40B", 50000), ("DM40C", 60000))
 
 def resolve_slot_scale(slot: str, kind: str, sign_flag: int):
     scale_flag = sign_flag & 0xFE
+
     if slot == "FREQ":
         return FREQ_SCALE_MAP[scale_flag]
-    factor = MODEL.device_counts / 60000.0
-    if kind == "CAP" and slot == "M1":
-        info = CAP_SCALE_MAP[scale_flag]
-    elif slot in ("M1", "COMB", "DC", "AC") and (kind.startswith("V") or kind == "DIODE"):
-        info = ALT_SCALE_MAP[scale_flag]
-    elif slot in ("M1", "COMB", "DC", "AC") and kind.startswith("A"):
-        info = AMP_SCALE_MAP[scale_flag]
-    elif slot == "M1" and kind in ("RES", "RES_ONLINE", "CONT"):
-        info = RES_SCALE_MAP[scale_flag]
+
+    if slot in ("M1", "DC", "AC"):
+        if kind.startswith("V") or kind == "DIODE":
+            info = ALT_SCALE_MAP[scale_flag]
+        elif kind.startswith("A"):
+            info = AMP_SCALE_MAP[scale_flag]
+        elif kind in ("RES", "RES_ONLINE", "CONT"):
+            info = RES_SCALE_MAP[scale_flag]
+        elif kind == "CAP":
+            info = CAP_SCALE_MAP[scale_flag]
+        else:
+            return None
     elif slot == "TC" and kind == "TEMP":
         info = (6000.0, "°C", 1.0, 1)
     elif slot == "RES" and kind == "DIODE":
-        return 6000.0 * factor, "Ω", 1.0, 1
+        info = (6000.0, "Ω", 1.0, 1)
     else:
         return None
 
+    factor = MODEL.device_counts / 60000.0
     fs_base, unit, mul, dec = info
     return fs_base * factor, unit, mul, dec
 
@@ -122,19 +127,23 @@ def parse_device_status(data: bytes) -> tuple:
 
 
 def process_slot(slot_type: str, counts: int, sign_flag: int, kind: str):
-    sign = -1 if (sign_flag & 0x01) else 1
+    ol = counts == 0xFFFF
 
-    if not (resolved := resolve_slot_scale(slot_type, kind, sign_flag)):
-        if slot_type in ("DUTY", "TF", "TI"):
-            val = counts * 0.1
-            return f"{val:.1f}", "%" if slot_type == "DUTY" else ("°F" if slot_type == "TF" else "°C")
-        return "", ""
+    if resolved := resolve_slot_scale(slot_type, kind, sign_flag):
+        full_scale, disp_unit, disp_mul, decimals = resolved
+        if ol:
+            return "OL", disp_unit
+        sign = -1 if (sign_flag & 1) else 1
+        val_disp = counts * (full_scale / MODEL.device_counts) * disp_mul * sign
+        return "%.*f" % (decimals, val_disp), disp_unit
 
-    full_scale, disp_unit, disp_mul, decimals = resolved
-    scale = full_scale / MODEL.device_counts
-    val_disp = (counts * scale * disp_mul) * sign
-    return f"{val_disp:.{decimals}f}", disp_unit
+    if slot_type in ("DUTY", "TF", "TI"):
+        val_str = "OL" if ol else "%.1f" % (counts * 0.1)
+        if slot_type == "DUTY":
+            return val_str, "%"
+        return val_str, "°F" if slot_type == "TF" else "°C INT"
 
+    return "", ""
 
 def parse_measurement_for_ui(data: bytes) -> Measurement:
     m = Measurement(raw=data.hex(" ").upper())
@@ -166,14 +175,14 @@ def parse_measurement_for_ui(data: bytes) -> Measurement:
     if not m.overload:
         sign = -1 if (s0 & 0x01) else 1
         m.norm_value = sign * m1 * (fs1 / eff_counts)
-        m.value_str = f"{m.norm_value * mul1:.{dec1}f}"
+        m.value_str = "%.*f" % (dec1, m.norm_value * mul1)
 
     if not rng_name.startswith("AUTO"):
         m.range = f"{(fs1 * mul1):.4g}{unit1}"
 
-    if len(slots) > 1 and m2 != 0xFFFF:
+    if len(slots) > 1:
         m.sec_val, m.sec_unit = process_slot(slots[1], m2, s1, kind)
-    if len(slots) > 2 and m3 != 0xFFFF:
+    if len(slots) > 2:
         m.third_val, m.third_unit = process_slot(slots[2], m3, s2, kind)
 
     return m

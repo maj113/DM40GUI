@@ -1,20 +1,14 @@
-"""BLE transport worker for DM40."""
+"""BLE transport worker."""
 
 import _thread
 import time
 
-from . import mini_asyncio as asyncio
+from shared import mini_asyncio as asyncio
+from shared.nanowinbt.client import NanoClient
 
-from .nanowinbt.client import NanoClient
-
-from .parsing import MODEL, MODEL_TABLE
-from .protocol_constants import (
-    CMD_ID,
-    CMD_READ,
-    NOTIFY_UUID,
-    SERVICE_UUID,
-    WRITE_UUID,
-)
+_SERVICE_UUID = "0000fff0-0000-1000-8000-00805f9b34fb"
+_NOTIFY_UUID  = "0000fff1-0000-1000-8000-00805f9b34fb"
+_WRITE_UUID   = "0000fff3-0000-1000-8000-00805f9b34fb"
 
 
 class BleWorker:
@@ -22,13 +16,17 @@ class BleWorker:
         "device", "_on_packet", "_on_tx", "_on_status", "_on_error",
         "_on_connected", "_on_disconnected", "_stopping", "alive",
         "_pending_cmd", "_loop", "_io_event",
+        "_poll_cmd", "_init_cmd", "_notify_hook", "_write_buf_size",
     )
-    MODEL_PREFIX = b"\xdf\x05\x03\x08\x14"
 
     def __init__(
         self,
         device,
         *,
+        poll_cmd: bytes,
+        init_cmd: bytes | None = None,
+        notify_hook=None,
+        write_buf_size: int = 20,
         on_packet=None,
         on_tx=None,
         on_status=None,
@@ -37,6 +35,10 @@ class BleWorker:
         on_disconnected=None,
     ):
         self.device = device
+        self._poll_cmd = poll_cmd
+        self._init_cmd = init_cmd
+        self._notify_hook = notify_hook
+        self._write_buf_size = write_buf_size
         self._on_packet = on_packet
         self._on_tx = on_tx
         self._on_status = on_status
@@ -44,12 +46,10 @@ class BleWorker:
         self._on_connected = on_connected
         self._on_disconnected = on_disconnected
         self._stopping = False
-        self.alive = False
-        self._pending_cmd: bytes | None = None
-        self._loop: asyncio.AbstractEventLoop | None = None
-        self._io_event: asyncio.Event | None = None
-
         self.alive = True
+        self._pending_cmd: bytes | None = None
+        self._loop = None
+        self._io_event = None
         try:
             _thread.start_new_thread(self.run, ())
         except Exception:
@@ -76,21 +76,27 @@ class BleWorker:
         try:
             loop.run_until_complete(self._main())
         except Exception as exc:
-            self._emit(self._on_error, f"Worker failed: {exc!r}")
+            on_error = self._on_error
+            if on_error:
+                on_error(f"Worker failed: {exc!r}")
         finally:
             self._loop = None
             self._io_event = None
             loop.close()
             self.alive = False
 
-    @staticmethod
-    def _emit(callback, *args) -> None:
-        if callback is not None:
-            callback(*args)
-
     async def _main(self) -> None:
-        device = self.device
-        address = device.address
+        device       = self.device
+        address      = device.address
+        on_packet    = self._on_packet
+        on_tx        = self._on_tx
+        on_status    = self._on_status
+        on_error     = self._on_error
+        on_connected = self._on_connected
+        on_disconn   = self._on_disconnected
+        poll_cmd     = self._poll_cmd
+        init_cmd     = self._init_cmd
+        notify_hook  = self._notify_hook
 
         last_rx = 0.0
         no_data_emitted = False
@@ -105,8 +111,10 @@ class BleWorker:
             if disconnect_notified:
                 return
             disconnect_notified = True
-            self._emit(self._on_status, f"disconnected — {address}")
-            self._emit(self._on_disconnected, address)
+            if on_status:
+                on_status(f"disconnected — {address}")
+            if on_disconn:
+                on_disconn(address)
 
         def on_notify(data: bytes) -> None:
             nonlocal last_rx, no_data_emitted, read_ready
@@ -114,14 +122,8 @@ class BleWorker:
             no_data_emitted = False
             read_ready = True
             io_event.set()
-
-            if data.startswith(self.MODEL_PREFIX):
-                idx = data[9] - ord("A")
-                if 0 <= idx < len(MODEL_TABLE):
-                    MODEL.model_name, MODEL.device_counts = MODEL_TABLE[idx]
-                return
-
-            self._emit(self._on_packet, data)
+            if (notify_hook is None or notify_hook(data)) and on_packet:
+                on_packet(data)
 
         def on_disconnect() -> None:
             nonlocal disconnected
@@ -129,22 +131,26 @@ class BleWorker:
             self._wake()
             _notify_disconnect()
 
-        self._emit(self._on_status, f"connecting — {address}")
+        if on_status:
+            on_status(f"connecting — {address}")
         async with NanoClient(device, disconnected_callback=on_disconnect) as client:
-            await client.prime_gatt(SERVICE_UUID, [NOTIFY_UUID, WRITE_UUID])
-            await client.start_notify(
-                NOTIFY_UUID,
-                on_notify,
-            )
+            await client.prime_gatt(_SERVICE_UUID, [_NOTIFY_UUID, _WRITE_UUID], self._write_buf_size)
+            await client.start_notify(_NOTIFY_UUID, on_notify)
 
-            try:
-                await client.write_gatt_char(WRITE_UUID, CMD_ID)
-            except Exception as exc:
-                self._emit(self._on_error, f"ID request failed: {exc!r}")
-                return
-            self._emit(self._on_status, f"connected — {address}")
-            self._emit(self._on_connected, address)
-            self._emit(self._on_tx, CMD_ID)
+            if init_cmd is not None:
+                try:
+                    await client.write_gatt_char(_WRITE_UUID, init_cmd)
+                except Exception as exc:
+                    if on_error:
+                        on_error(f"Init failed: {exc!r}")
+                    return
+                if on_tx:
+                    on_tx(init_cmd)
+
+            if on_status:
+                on_status(f"connected — {address}")
+            if on_connected:
+                on_connected(address)
             io_event.set()
 
             try:
@@ -161,27 +167,25 @@ class BleWorker:
                     if read_ready:
                         cmd = self._pending_cmd
                         self._pending_cmd = None
-                        payload = cmd if cmd is not None else CMD_READ
-
+                        payload = poll_cmd if cmd is None else cmd
                         try:
-                            await client.write_gatt_char(WRITE_UUID, payload)
+                            await client.write_gatt_char(_WRITE_UUID, payload)
                         except Exception as exc:
-                            self._emit(self._on_error, f"{'Write' if cmd else 'Read'} failed: {exc!r}")
+                            if on_error:
+                                on_error(f"{'Write' if cmd else 'Poll'} failed: {exc!r}")
                             return
-
-                        if cmd is not None:
-                            self._emit(self._on_tx, payload)
+                        if cmd is not None and on_tx:
+                            on_tx(payload)
                         read_ready = False
 
                     if last_rx and not no_data_emitted and (time.monotonic() - last_rx) > 2.0:
-                        self._emit(self._on_status, f"connected — {address} — (no data)")
+                        if on_status:
+                            on_status(f"connected — {address} — (no data)")
                         no_data_emitted = True
 
             finally:
                 try:
-                    await client.stop_notify(
-                        NOTIFY_UUID,
-                    )
+                    await client.stop_notify(_NOTIFY_UUID)
                 except Exception:
                     pass
                 _notify_disconnect()

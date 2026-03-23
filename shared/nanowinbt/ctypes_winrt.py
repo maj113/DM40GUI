@@ -44,11 +44,12 @@ def _guid(s: str,
     b[6:8] = b[7:5:-1]
     return _f(b)
 
-IID_IASYNC_INFO = _guid("00000036-0000-0000-C000-000000000046")
-IID_IAGILE_OBJECT = _guid("94EA2B94-E9CC-49E0-C0FF-EE64CA8F5B90")
-IID_IUNKNOWN = _guid("00000000-0000-0000-C000-000000000046")
+def _bguid(s: str, _r=str.replace, _h=bytes.fromhex):
+    b = _h(_r(s, "-", ""))
+    return b[3::-1]+b[5:3:-1]+b[7:5:-1]+b[8:]
 
-# Typed async completion handler IIDs from WinRT metadata (System.Runtime.WindowsRuntime).
+IID_IASYNC_INFO = _guid("00000036-0000-0000-C000-000000000046")
+
 IID_ASYNC_COMPLETED_HANDLER_BLUETOOTH_LE_DEVICE = _guid(
     "9156B79F-C54A-5277-8F8B-D2CC43C7E004"
 )
@@ -62,7 +63,6 @@ IID_ASYNC_COMPLETED_HANDLER_GATT_COMM_STATUS = _guid(
     "2154117A-978D-59DB-99CF-6B690CB3389B"
 )
 
-# Interface IIDs gathered from runtime introspection and WinSDK 22621 headers.
 IID_BLUETOOTH_LE_ADVERTISEMENT_WATCHER = _guid(
     "A6AC336F-F3D3-4297-8D6C-C81EA6623F40"
 )
@@ -74,7 +74,6 @@ IID_GATT_DEVICE_SERVICE3 = _guid("B293A950-0C53-437C-A9B3-5C3210C6E569")
 IID_IBUFFER_FACTORY = _guid("71AF914D-C10F-484B-BC50-14BC623B3A27")
 IID_IBUFFER_BYTE_ACCESS = _guid("905A0FEF-BC53-11DF-8C49-001E4FC686DA")
 
-# Delegate specialization IIDs from Windows.Devices.Bluetooth.Advertisement.h.
 IID_TYPED_EVENT_HANDLER_WATCHER_RECEIVED = _guid(
     "90EB4ECA-D465-5EA0-A61C-033C8C5ECEF2"
 )
@@ -95,11 +94,10 @@ GATT_CCCD_NOTIFY = 1
 
 BLUETOOTH_CONNECTION_STATUS_CONNECTED = 1
 
-_IUNKNOWN_BYTES = bytes(IID_IUNKNOWN)
-_IAGILE_BYTES = bytes(IID_IAGILE_OBJECT)
+_IUNKNOWN_BYTES = _bguid("00000000-0000-0000-C000-000000000046")
+_IAGILE_BYTES = _bguid("94EA2B94-E9CC-49E0-C0FF-EE64CA8F5B90")
 
 
-# Reusable WINFUNCTYPE prototypes for COM vtable fields and delegate construction.
 _QI_FUNC = ctypes.WINFUNCTYPE(
     _c_long,
     _c_void_p,
@@ -166,7 +164,6 @@ class HString:
 
 
 def _vtbl_invoke(this_ptr: ctypes.c_void_p | int, index, restype, argtypes, *args):
-    # WINFUNCTYPE returns python int pointer instead of c_void_p
     addr = getattr(this_ptr, 'value', this_ptr)
     return _get_vtbl_fn_type(restype, argtypes)(
         _voidp_at(_voidp_at(addr).value + index * _SZ_VOIDP).value  # type: ignore[operator]
@@ -206,7 +203,6 @@ _ro_activate_instance = _combase.RoActivateInstance
 _ro_activate_instance.argtypes = [_c_void_p, _PPVOID]
 _ro_activate_instance.restype = _c_long
 
-# Cache function prototypes so _vtbl_invoke does not rebuild WINFUNCTYPE objects.
 _VTBL_FN_TYPE_CACHE: dict = {}
 
 
@@ -219,7 +215,6 @@ def _get_vtbl_fn_type(restype: type, argtypes: tuple[type, ...]):
     return fn_type
 
 
-# Common argtype tuples for _vtbl_invoke call sites.
 _ARG_PGUID_PPVOID = (_PGUID, _PPVOID)
 _ARG_OUT_INT = (_PINT,)
 _ARG_OUT_INT16 = (_PINT16,)
@@ -370,7 +365,6 @@ def btle_statics_from_bluetooth_address_async(  # IBluetoothLEDeviceStatics::Fro
 def btle_device6_request_throughput_params(device_ptr: ctypes.c_void_p) -> None:
     """Request ThroughputOptimized connection parameters (interval 12 = 15ms)."""
 
-    # QI Device6 first — absent on Win10
     d6 = _c_void_p()
     if _vtbl_invoke(device_ptr, 0, _c_long,
             _ARG_PGUID_PPVOID,

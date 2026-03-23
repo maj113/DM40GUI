@@ -4,7 +4,7 @@ import time
 import tkinter as tk
 from _collections import deque # type: ignore
 
-from dm40.types import ThemePalette
+
 
 from .tooltip import Tooltip
 
@@ -13,7 +13,7 @@ class WaveformView(tk.Canvas):
     GRID_FRACS = (0.25, 0.5, 0.75)
     _DRAG_PX = 5
 
-    def __init__(self, master: tk.Misc, *, colors: ThemePalette, capacity: int = 600):
+    def __init__(self, master: tk.Misc, *, colors, capacity: int = 600):
         super().__init__(master, highlightthickness=2, bd=0)
         self._cap = max(16, int(capacity))
         self._buf: deque[float] = deque(maxlen=self._cap)
@@ -272,7 +272,7 @@ class WaveformView(tk.Canvas):
 
     # Theme
 
-    def set_colors(self, colors: ThemePalette) -> None:
+    def set_colors(self, colors) -> None:
         fg, trace, grid = colors.text, colors.accent, colors.outline
         self.itemconfigure(self._trace_line, fill=trace)
         self.itemconfigure(self._hover_line, fill=grid)
@@ -369,14 +369,12 @@ class WaveformView(tk.Canvas):
             else:
                 self._draw_sel(s, e)
 
-    # CSV save / record──
-
     def save_buffer_csv(self, path: str) -> int:
         """Write current buffer to *path* as CSV. Returns row count."""
         with open(path, "w", newline="") as f:
             f.write("Timestamp,Value\n")
             for ts, v in zip(self._ts, self._buf):
-                f.write(f"{ts},{v}\n")
+                f.write("%s,%s\n" % (ts, v))
         return len(self._buf)
 
     def toggle_recording(self, path: str) -> bool:
