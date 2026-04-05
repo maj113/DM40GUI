@@ -1,1 +1,1 @@
-nuitka[onefile]==4.0.6
+nuitka[onefile]==4.0.7
