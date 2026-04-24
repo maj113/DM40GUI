@@ -5,6 +5,7 @@ from _heapq import heappop, heappush
 
 
 _tls = _thread._local()
+_tls.running_loop = None
 
 
 class TimerHandle:
@@ -194,13 +195,10 @@ class AbstractEventLoop:
                 callback(*args)
             return
 
-        sleep_for = 0.001
         if self._timers:
-            sleep_for = self._timers[0][0] - now
-            if sleep_for < 0.0:
-                sleep_for = 0.0
-            elif sleep_for > 0.01:
-                sleep_for = 0.01
+            sleep_for = min(max(self._timers[0][0] - now, 0.0), 0.01)
+        else:
+            sleep_for = 0.001
         time.sleep(sleep_for)
 
 
@@ -209,7 +207,7 @@ def new_event_loop():
 
 
 def get_running_loop():
-    loop = getattr(_tls, "running_loop", None)
+    loop = _tls.running_loop
     if loop is None:
         raise RuntimeError("no running event loop")
     return loop

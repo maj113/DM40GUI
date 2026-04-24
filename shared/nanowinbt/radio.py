@@ -8,8 +8,6 @@ class NanoRadioStateError(RuntimeError):
 _INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
 _RADIO_FUNCS = None
 
-# byref holds a strong ref to the c_ulong via PyCArgObject.obj (Py_NewRef);
-# safe to cache at module level — verified against CPython 3.10–3.14 source.
 _FIND_RADIO_PARAMS_PTR = ctypes.byref(ctypes.c_ulong(4))  # sizeof(BLUETOOTH_FIND_RADIO_PARAMS)
 
 
