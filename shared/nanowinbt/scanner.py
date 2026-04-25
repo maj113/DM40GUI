@@ -1,8 +1,8 @@
 from .. import mini_asyncio as asyncio
-from . import ctypes_winrt as w
+from ..nanowinbt import ctypes_winrt as w
 from .ctypes_com import RoSession
 from .radio import ensure_bluetooth_radio_on, get_bluetooth_radio_state
-from dm40.types import NanoBLEDevice
+from shared.types import NanoBLEDevice
 
 
 class NanoScanner:
@@ -33,15 +33,18 @@ async def _discover(timeout: float, *, scanning_mode: str = "active", on_device=
         devices: dict[int, NanoBLEDevice] = {}
 
         def handle_received(addr: int, rssi: int, name: str | None, device: NanoBLEDevice | None) -> None:
+            changed = False
             if device is None:
                 device = NanoBLEDevice(address=_format_bdaddr(addr), name=name, rssi=rssi, bluetooth_address=addr)
                 devices[addr] = device
+                changed = True
             else:
                 device.rssi = rssi
                 if name and not device.name:
                     device.name = name
+                    changed = True
 
-            if on_device is not None:
+            if changed and on_device is not None:
                 on_device(device)
 
         def on_received(_sender, args_ptr) -> None:

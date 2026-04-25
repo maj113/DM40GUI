@@ -7,7 +7,7 @@ This file explains how themes are defined and loaded.
 `GUI/theme_manager.py` is the runtime source of truth.
 
 - Theme bytes are embedded in `_DEFAULT_STORE`.
-- `ThemeManager` loads palettes with `deserialize_theme_store_palettes(_DEFAULT_STORE)`.
+- `ThemeManager` loads palettes with `deserialize_theme_store_palettes(_DEFAULT_STORE)` from `shared.theme_store`.
 - Active theme selection is index-based.
 
 Theme persistence uses the Windows registry:
@@ -19,41 +19,38 @@ Only the selected index is persisted. Theme definitions are static until `_DEFAU
 
 ## Theme Schema
 
-Themes map to `ThemePalette` in `dm40/types.py` and must provide exactly 14 fields in this order:
+Themes map to `ThemePalette` in `shared/types.py` and must provide exactly 11 fields in this order:
 
 1. `name`
 2. `bg`
-3. `panel`
-4. `widget`
-5. `text`
-6. `muted`
-7. `accent`
-8. `accent_hover`
-9. `accent_pressed`
-10. `outline`
-11. `alt_text`
-12. `hover`
-13. `button`
-14. `button_pressed`
+3. `widget`
+4. `text`
+5. `accent`
+6. `accent_hover`
+7. `accent_pressed`
+8. `outline`
+9. `alt_text`
+10. `hover`
+11. `button`
 
 All color values must use `#RRGGBB` format.
 
 ## Embedded Store Format
 
-`dm40/theme_store.py` encodes themes as back-to-back records with no global header.
+`shared/theme_store.py` decodes themes as back-to-back records with no global header.
 
 Per theme record:
 
 - 1 byte: name length
 - N bytes: name (`latin1`)
-- 91 bytes: color payload (`13 * 7`)
+- 70 bytes: color payload (`10 * 7`)
 
-Validation in `serialize_theme_store` enforces:
+Validation in `utils/theme_store_builder.py` enforces:
 
 - at least one theme
-- exactly 14 fields per theme
+- exactly 11 fields per theme
 - name length <= 255 bytes
-- color payload length of 91
+- color payload length of 70
 - each color starts with `#`
 
 ## Updating Themes

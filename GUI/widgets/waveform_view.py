@@ -1,23 +1,21 @@
-"""Waveform view for DM40 readings."""
-
 import time
 import tkinter as tk
 from _collections import deque # type: ignore
-
-from dm40.types import ThemePalette
-
-from .tooltip import Tooltip
 
 
 class WaveformView(tk.Canvas):
     GRID_FRACS = (0.25, 0.5, 0.75)
     _DRAG_PX = 5
+    _TIP_PAD_X = 6
+    _TIP_PAD_Y = 4
+    _TIP_MARGIN = 12
 
-    def __init__(self, master: tk.Misc, *, colors: ThemePalette, capacity: int = 600):
+    def __init__(self, master: tk.Misc, *, colors, capacity: int = 600):
         super().__init__(master, highlightthickness=2, bd=0)
         self._cap = max(16, int(capacity))
         self._buf: deque[float] = deque(maxlen=self._cap)
         self._ts: deque[str] = deque(maxlen=self._cap)
+        self._extras: deque[tuple[str, str]] = deque(maxlen=self._cap)
         self._pad = 0.0
         self._lo = 0.0
         self._hi = 1.0
@@ -31,12 +29,14 @@ class WaveformView(tk.Canvas):
         self._ch = 0
         self._x_step = 0.0
 
-        # Interaction state
+        # Interaction state (all coords are canvas-local)
         self._hover_idx: int | None = None
-        self._last_ptr: tuple[int, int] | None = None
+        self._last_x = 0
+        self._last_y = 0
         self._hover_visible = False
+        self._tip_visible = False
         self._paused = False
-        self._pause_queue: list[tuple[float, str, float]] = []
+        self._pause_queue: list[tuple[float, str, float, str]] = []
         self._tracked_idx: int | None = None
         self._sel_range: tuple[int, int] | None = None
         self._sel_visible = False
@@ -56,7 +56,8 @@ class WaveformView(tk.Canvas):
         self._sel_rect = self.create_rectangle(
             0, 0, 0, 0, state="hidden", stipple="gray12", width=1, tags=("sel",)
         )
-        self._tooltip = Tooltip(master, "TkDefaultFont")
+        self._tip_rect = self.create_rectangle(0, 0, 0, 0, state="hidden", width=2, tags=("tip",))
+        self._tip_text = self.create_text(0, 0, text="", state="hidden", anchor="nw", tags=("tip",))
 
         for seq, cb in (
             ("<Configure>", self._on_configure), ("<Motion>", self._on_motion),
@@ -87,19 +88,44 @@ class WaveformView(tk.Canvas):
             max(0, min(self._x_to_idx(max(x1, x2)), last)),
         )
 
+    # In-canvas tooltip
+
+    def _show_tip(self, text: str, x: int, y: int) -> None:
+        """Draw tooltip rect + text at canvas coord (x, y), clamping to bounds."""
+        self.itemconfigure(self._tip_text, text=text, state="normal")
+        bb = self.bbox(self._tip_text)
+        if not bb:
+            return
+        w = bb[2] - bb[0] + 2 * self._TIP_PAD_X
+        h = bb[3] - bb[1] + 2 * self._TIP_PAD_Y
+        m = self._TIP_MARGIN
+        if x + w > self._cw - m: x = self._cw - w - m
+        if y + h > self._ch - m: y = self._ch - h - m
+        if x < m: x = m
+        if y < m: y = m
+        self.coords(self._tip_rect, x, y, x + w, y + h)
+        self.coords(self._tip_text, x + self._TIP_PAD_X, y + self._TIP_PAD_Y)
+        if not self._tip_visible:
+            self.itemconfigure(self._tip_rect, state="normal")
+            self._tip_visible = True
+
+    def _hide_tip(self) -> None:
+        if not self._tip_visible:
+            return
+        self.itemconfigure("tip", state="hidden")
+        self._tip_visible = False
+
     # Hover / point display
 
     def _clear_hover(self) -> None:
-        if not self._hover_visible and not self._tooltip.is_visible():
-            return
         self._hover_idx = None
-        self._tooltip.hide()
+        self._hide_tip()
         if self._hover_visible:
             self.itemconfigure("hover", state="hidden")
             self._hover_visible = False
 
-    def _show_point(self, idx: int, root_x: int, root_y: int, delay_ms: int = 0) -> None:
-        """Position hover line/dot and show tooltip for buffer index *idx*."""
+    def _show_point(self, idx: int, tip_x: int, tip_y: int) -> None:
+        """Position hover line/dot and tooltip for buffer index *idx*."""
         self._hover_idx = idx
         h = self._ch
         x = self._idx_to_x(idx)
@@ -111,10 +137,12 @@ class WaveformView(tk.Canvas):
         if not self._hover_visible:
             self.itemconfigure("hover", state="normal")
             self._hover_visible = True
-        self._tooltip.show(
-            f"{self._axis_label(value)}\n{self._ts[idx]}",
-            root_x, root_y, delay_ms=delay_ms,
-        )
+        tip_label, extra = self._extras[idx]
+        text = tip_label or self._axis_label(value)
+        if extra:
+            text = f"{text}\n{extra}"
+        text = f"{text}\n{self._ts[idx]}"
+        self._show_tip(text, tip_x, tip_y)
 
     # Pause
 
@@ -134,9 +162,10 @@ class WaveformView(tk.Canvas):
         overflow = max(0, len(self._buf) + len(queue) - self._cap)
         if overflow:
             self._shift_indices(overflow)
-        for value, ts, _ in queue:
+        for value, ts, _, tip_label, extra in queue:
             self._buf.append(value)
             self._ts.append(ts)
+            self._extras.append((tip_label, extra))
         self.redraw()
 
     @property
@@ -156,17 +185,13 @@ class WaveformView(tk.Canvas):
         if not self._sel_visible:
             self.itemconfigure(self._sel_rect, state="normal")
             self._sel_visible = True
-        bbox = self.bbox(self._sel_rect)
-        tip_x = self.winfo_rootx() + (bbox[2] if bbox else int(round(xr))) + 12
         snap = [self._buf[i] for i in range(s, e + 1)]
         vmin, vmax = min(snap), max(snap)
-        self._tooltip.show(
+        self._show_tip(
             f"Min: {self._axis_label(vmin)}  Max: {self._axis_label(vmax)}  "
             f"\u0394: {self._axis_label(vmax - vmin)}\n"
             f"{self._ts[s]} \u2192 {self._ts[e]}  ({e - s + 1} pts)",
-            tip_x,
-            self.winfo_rooty() + 12,
-            delay_ms=0,
+            int(round(xr)) + 12, 12,
         )
 
     def _clear_selection(self) -> None:
@@ -174,7 +199,7 @@ class WaveformView(tk.Canvas):
         if self._sel_visible:
             self.itemconfigure(self._sel_rect, state="hidden")
             self._sel_visible = False
-        self._tooltip.hide()
+        self._hide_tip()
 
     # Index shifting on deque overflow
 
@@ -207,7 +232,6 @@ class WaveformView(tk.Canvas):
         self.redraw()
 
     def _on_leave(self, _e=None) -> None:
-        self._last_ptr = None
         if self._tracked_idx is None and self._sel_range is None:
             self._clear_hover()
 
@@ -216,10 +240,9 @@ class WaveformView(tk.Canvas):
             return
         idx = self._x_to_idx(event.x)
         if 0 <= idx < len(self._buf):
-            ptr = (event.x_root, event.y_root)
-            if self._hover_idx != idx or self._last_ptr != ptr:
-                self._last_ptr = ptr
-                self._show_point(idx, ptr[0] + 12, ptr[1] + 12, delay_ms=120)
+            self._last_x = event.x
+            self._last_y = event.y
+            self._show_point(idx, event.x + 12, event.y + 12)
         else:
             self._clear_hover()
 
@@ -258,11 +281,7 @@ class WaveformView(tk.Canvas):
         idx = self._x_to_idx(event.x)
         if 0 <= idx < len(self._buf):
             self._tracked_idx = idx
-            self._show_point(
-                idx,
-                self.winfo_rootx() + int(self._idx_to_x(idx)) + 12,
-                self.winfo_rooty() + 12,
-            )
+            self._show_point(idx, int(self._idx_to_x(idx)) + 12, 12)
         else:
             self._clear_tracking()
 
@@ -272,8 +291,8 @@ class WaveformView(tk.Canvas):
 
     # Theme
 
-    def set_colors(self, colors: ThemePalette) -> None:
-        fg, trace, grid = colors.text, colors.accent, colors.outline
+    def set_colors(self, colors) -> None:
+        fg, trace, grid, bg = colors.text, colors.accent, colors.outline, colors.bg
         self.itemconfigure(self._trace_line, fill=trace)
         self.itemconfigure(self._hover_line, fill=grid)
         self.itemconfigure(self._hover_dot, fill=trace, outline=trace)
@@ -281,12 +300,15 @@ class WaveformView(tk.Canvas):
         self.itemconfigure(self._bot_text, fill=fg)
         self.itemconfigure("grid", fill=grid)
         self.itemconfigure(self._sel_rect, fill=trace, outline=trace)
+        self.itemconfigure(self._tip_rect, fill=bg, outline=grid)
+        self.itemconfigure(self._tip_text, fill=fg)
 
     # Data
 
     def clear(self) -> None:
         self._buf.clear()
         self._ts.clear()
+        self._extras.clear()
         self._pause_queue.clear()
         self._clear_tracking()
         self._clear_selection()
@@ -301,6 +323,8 @@ class WaveformView(tk.Canvas):
         axis_unit: str | None = None,
         axis_mul: float | None = None,
         decimals: int | None = None,
+        tip_value_label: str = "",
+        tooltip_extra: str = "",
     ) -> None:
         if axis_unit is not None:
             self._axis_unit = axis_unit
@@ -309,13 +333,14 @@ class WaveformView(tk.Canvas):
         if decimals is not None:
             self._decimals = max(0, min(9, decimals))
         if self._paused:
-            self._pause_queue.append((value, time.strftime("%H:%M:%S"), pad))
+            self._pause_queue.append((value, time.strftime("%H:%M:%S"), pad, tip_value_label, tooltip_extra))
             return
         self._pad = pad
         if len(self._buf) == self._cap:
             self._shift_indices()
         self._buf.append(value)
         self._ts.append(time.strftime("%H:%M:%S"))
+        self._extras.append((tip_value_label, tooltip_extra))
         if self._rec_file is not None:
             self._rec_file.write(f"{self._ts[-1]},{value}\n")
         self.redraw()
@@ -350,18 +375,13 @@ class WaveformView(tk.Canvas):
         if self._tracked_idx is not None:
             idx = self._tracked_idx
             if 0 <= idx < len(values):
-                self._show_point(
-                    idx,
-                    self.winfo_rootx() + int(self._idx_to_x(idx)) + 12,
-                    self.winfo_rooty() + 12,
-                )
+                self._show_point(idx, int(self._idx_to_x(idx)) + 12, 12)
             else:
                 self._clear_tracking()
-        elif self._hover_idx is not None and self._last_ptr is not None:
+        elif self._hover_idx is not None:
             idx = self._hover_idx
             if idx < len(values):
-                px, py = self._last_ptr
-                self._show_point(idx, px + 12, py + 12, delay_ms=120)
+                self._show_point(idx, self._last_x + 12, self._last_y + 12)
         if self._sel_range is not None:
             s, e = self._sel_range
             if e >= len(values):
@@ -369,24 +389,15 @@ class WaveformView(tk.Canvas):
             else:
                 self._draw_sel(s, e)
 
-    # CSV save / record──
-
-    def save_buffer_csv(self, path: str) -> int:
-        """Write current buffer to *path* as CSV. Returns row count."""
+    def save_buffer_csv(self, path: str) -> None:
         with open(path, "w", newline="") as f:
             f.write("Timestamp,Value\n")
             for ts, v in zip(self._ts, self._buf):
-                f.write(f"{ts},{v}\n")
-        return len(self._buf)
+                f.write("%s,%s\n" % (ts, v))
 
-    def toggle_recording(self, path: str) -> bool:
-        """Start or stop CSV recording. Returns new recording state."""
-        if self._rec_file is not None:
-            self.stop_recording()
-            return False
+    def toggle_recording(self, path: str) -> None:
         self._rec_file = open(path, "w", newline="")
         self._rec_file.write("Timestamp,Value\n")
-        return True
 
     def stop_recording(self) -> None:
         if self._rec_file is not None:

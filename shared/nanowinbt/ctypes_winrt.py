@@ -35,20 +35,18 @@ _PINT16 = ctypes.POINTER(ctypes.c_int16)
 _PUINT32 = ctypes.POINTER(ctypes.c_uint32)
 _PUINT64 = ctypes.POINTER(ctypes.c_uint64)
 
-def _guid(s: str,
-    _r=str.replace, _h=bytearray.fromhex, _f=GUID.from_buffer_copy,
-):
+def _bguid(s: str, _r=str.replace, _h=bytearray.fromhex):
     b = _h(_r(s, "-", ""))
     b[0:4] = b[3::-1]
     b[4:6] = b[5:3:-1]
     b[6:8] = b[7:5:-1]
-    return _f(b)
+    return bytes(b)
+
+def _guid(s: str, _f=GUID.from_buffer_copy):
+    return _f(_bguid(s))
 
 IID_IASYNC_INFO = _guid("00000036-0000-0000-C000-000000000046")
-IID_IAGILE_OBJECT = _guid("94EA2B94-E9CC-49E0-C0FF-EE64CA8F5B90")
-IID_IUNKNOWN = _guid("00000000-0000-0000-C000-000000000046")
 
-# Typed async completion handler IIDs from WinRT metadata (System.Runtime.WindowsRuntime).
 IID_ASYNC_COMPLETED_HANDLER_BLUETOOTH_LE_DEVICE = _guid(
     "9156B79F-C54A-5277-8F8B-D2CC43C7E004"
 )
@@ -62,7 +60,6 @@ IID_ASYNC_COMPLETED_HANDLER_GATT_COMM_STATUS = _guid(
     "2154117A-978D-59DB-99CF-6B690CB3389B"
 )
 
-# Interface IIDs gathered from runtime introspection and WinSDK 22621 headers.
 IID_BLUETOOTH_LE_ADVERTISEMENT_WATCHER = _guid(
     "A6AC336F-F3D3-4297-8D6C-C81EA6623F40"
 )
@@ -74,7 +71,6 @@ IID_GATT_DEVICE_SERVICE3 = _guid("B293A950-0C53-437C-A9B3-5C3210C6E569")
 IID_IBUFFER_FACTORY = _guid("71AF914D-C10F-484B-BC50-14BC623B3A27")
 IID_IBUFFER_BYTE_ACCESS = _guid("905A0FEF-BC53-11DF-8C49-001E4FC686DA")
 
-# Delegate specialization IIDs from Windows.Devices.Bluetooth.Advertisement.h.
 IID_TYPED_EVENT_HANDLER_WATCHER_RECEIVED = _guid(
     "90EB4ECA-D465-5EA0-A61C-033C8C5ECEF2"
 )
@@ -95,11 +91,10 @@ GATT_CCCD_NOTIFY = 1
 
 BLUETOOTH_CONNECTION_STATUS_CONNECTED = 1
 
-_IUNKNOWN_BYTES = bytes(IID_IUNKNOWN)
-_IAGILE_BYTES = bytes(IID_IAGILE_OBJECT)
+_IUNKNOWN_BYTES = _bguid("00000000-0000-0000-C000-000000000046")
+_IAGILE_BYTES = _bguid("94EA2B94-E9CC-49E0-C0FF-EE64CA8F5B90")
 
 
-# Reusable WINFUNCTYPE prototypes for COM vtable fields and delegate construction.
 _QI_FUNC = ctypes.WINFUNCTYPE(
     _c_long,
     _c_void_p,
@@ -166,7 +161,6 @@ class HString:
 
 
 def _vtbl_invoke(this_ptr: ctypes.c_void_p | int, index, restype, argtypes, *args):
-    # WINFUNCTYPE returns python int pointer instead of c_void_p
     addr = getattr(this_ptr, 'value', this_ptr)
     return _get_vtbl_fn_type(restype, argtypes)(
         _voidp_at(_voidp_at(addr).value + index * _SZ_VOIDP).value  # type: ignore[operator]
@@ -206,7 +200,6 @@ _ro_activate_instance = _combase.RoActivateInstance
 _ro_activate_instance.argtypes = [_c_void_p, _PPVOID]
 _ro_activate_instance.restype = _c_long
 
-# Cache function prototypes so _vtbl_invoke does not rebuild WINFUNCTYPE objects.
 _VTBL_FN_TYPE_CACHE: dict = {}
 
 
@@ -219,7 +212,6 @@ def _get_vtbl_fn_type(restype: type, argtypes: tuple[type, ...]):
     return fn_type
 
 
-# Common argtype tuples for _vtbl_invoke call sites.
 _ARG_PGUID_PPVOID = (_PGUID, _PPVOID)
 _ARG_OUT_INT = (_PINT,)
 _ARG_OUT_INT16 = (_PINT16,)
@@ -231,7 +223,7 @@ _ARG_HANDLER_EVENT_TOKEN = (_c_void_p, _PEVENT_TOKEN)
 _ARG_UINT32_OUT_VOIDP = (_c_uint32, _PPVOID)
 _ARG_UINT64_OUT_VOIDP = (_c_uint64, _PPVOID)
 _ARG_CINT_OUT_VOIDP = (_c_int, _PPVOID)
-_ARG_GUID_OUT_VOIDP = (GUID, _PPVOID)
+_ARG_GUID_CINT_OUT_VOIDP = (GUID, _c_int, _PPVOID)
 _ARG_VOIDP_OUT_VOIDP = (_c_void_p, _PPVOID)
 _ARG_VOIDP_CINT_OUT_VOIDP = (_c_void_p, _c_int, _PPVOID)
 _ARG_EVENT_TOKEN = (EventRegistrationToken,)
@@ -370,7 +362,6 @@ def btle_statics_from_bluetooth_address_async(  # IBluetoothLEDeviceStatics::Fro
 def btle_device6_request_throughput_params(device_ptr: ctypes.c_void_p) -> None:
     """Request ThroughputOptimized connection parameters (interval 12 = 15ms)."""
 
-    # QI Device6 first — absent on Win10
     d6 = _c_void_p()
     if _vtbl_invoke(device_ptr, 0, _c_long,
             _ARG_PGUID_PPVOID,
@@ -387,8 +378,7 @@ def btle_device6_request_throughput_params(device_ptr: ctypes.c_void_p) -> None:
         _vtbl_invoke(d6, 8, _c_long,  # RequestPreferredConnectionParameters [8]
             _ARG_VOIDP_OUT_VOIDP,
             preset, _byref(req))
-        if req.value:
-            release_ptr(req)
+        release_ptr(req)
         release_ptr(preset)
     except Exception:
         pass
@@ -396,10 +386,10 @@ def btle_device6_request_throughput_params(device_ptr: ctypes.c_void_p) -> None:
         release_ptr(d6)
 
 
-def btle_device3_get_gatt_services_for_uuid_async(ptr, service_uuid):  # IBluetoothLEDevice3::GetGattServicesForUuidAsync [10]
+def btle_device3_get_gatt_services_for_uuid_uncached_async(ptr, service_uuid):  # IBluetoothLEDevice3::GetGattServicesForUuidAsync(serviceUuid, cacheMode) [11]
     op = _c_void_p()
-    hr = _vtbl_invoke(ptr, 10, _c_long, _ARG_GUID_OUT_VOIDP, service_uuid, _byref(op))
-    _check_hresult(hr, "BTLEDevice3.GetGattServicesForUuidAsync")
+    hr = _vtbl_invoke(ptr, 11, _c_long, _ARG_GUID_CINT_OUT_VOIDP, service_uuid, _c_int(1), _byref(op))
+    _check_hresult(hr, "BTLEDevice3.GetGattServicesForUuidWithCacheModeAsync")
     return op
 
 
