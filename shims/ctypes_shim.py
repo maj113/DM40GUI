@@ -19,12 +19,12 @@ class c_long(_SimpleCData):
 class c_ulong(_SimpleCData):
     _type_ = "L"
 
+class c_ubyte(_SimpleCData):
+    _type_ = "B"
+
 # Windows LLP64: int == long == 4, longlong == 8 (always)
 c_int = c_long
 c_uint = c_ulong
-
-class c_ubyte(_SimpleCData):
-    _type_ = "B"
 
 class c_void_p(_SimpleCData):
     _type_ = "P"

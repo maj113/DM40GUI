@@ -1,12 +1,9 @@
 import tkinter as tk
 
-from GUI.widgets.helpers import theme_title_bar
+from GUI.widgets.helpers import center_on_parent, theme_title_bar
 from GUI.widgets.themed_button import ThemedButton
 
-INFO_ICON = 0
-ERROR_ICON = 1
-
-_ICON_LIST = ("i", "✕")
+_ERROR_ICON = "\u2715"
 
 
 class _ThemedDialog(tk.Toplevel):
@@ -17,7 +14,7 @@ class _ThemedDialog(tk.Toplevel):
         message,
         *,
         theme,
-        icon=ERROR_ICON,
+        icon=_ERROR_ICON,
         detail=None,
         buttons=None,
         default=None,
@@ -55,12 +52,11 @@ class _ThemedDialog(tk.Toplevel):
         if detail:
             message = f"{message}\n\n{detail}\n" if message else detail
         wrap_length = 260
-        icon_text = _ICON_LIST[icon]
 
-        if icon_text:
+        if icon:
             icon_label = tk.Label(
                 container,
-                text=icon_text,
+                text=icon,
                 font=("Segoe UI", 18, "bold"),
             )
             icon_label.grid(row=0, column=0, sticky="n", padx=(0, 12))
@@ -97,8 +93,6 @@ class _ThemedDialog(tk.Toplevel):
 
     def _apply_minsize(self):
         container = self._layout_root
-        if not container:
-            return
         try:
             container.update_idletasks()
             required_w = container.winfo_reqwidth()
@@ -116,28 +110,10 @@ class _ThemedDialog(tk.Toplevel):
         self._target_size = (min_w, min_h)
 
     def _center(self, parent):
-        try:
-            self.update_idletasks()
-        except tk.TclError:
-            pass
-
-        try:
-            parent.update_idletasks()
-            parent_x = parent.winfo_rootx()
-            parent_y = parent.winfo_rooty()
-            parent_w = parent.winfo_width()
-            parent_h = parent.winfo_height()
-        except tk.TclError:
-            parent_x = parent_y = 0
-            parent_w = self.winfo_screenwidth()
-            parent_h = self.winfo_screenheight()
-
         target_w, target_h = self._target_size
-        w = target_w if target_w else self.winfo_width()
-        h = target_h if target_h else self.winfo_height()
-        x = parent_x + (parent_w - w) // 2
-        y = parent_y + (parent_h - h) // 2
-        self.geometry(f"{w}x{h}+{x}+{y}")
+        w = target_w if target_w else None
+        h = target_h if target_h else None
+        center_on_parent(self, parent, w, h)
 
     def _finish(self, value):
         self._result = value
@@ -184,7 +160,7 @@ def show_error(parent, title, message, *, theme: tuple, detail=None):
         title,
         message,
         theme=theme,
-        icon=ERROR_ICON,
+        icon=_ERROR_ICON,
         buttons=[("OK", True)],
         default=True,
         cancel_value=True,

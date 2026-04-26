@@ -2,9 +2,8 @@ import winreg
 import tkinter as tk
 from tkinter import ttk
 
-from dm40.types import ThemePalette
-from dm40.theme_store import deserialize_theme_store_palettes
-from GUI.widgets.helpers import theme_title_bar
+from shared.theme_store import deserialize_theme_store_palettes
+from GUI.widgets.helpers import center_on_parent, theme_title_bar
 from GUI.widgets.themed_button import ThemedButton
 
 _PREVIEW_FRAME = "ThemePreview.TFrame"
@@ -34,7 +33,7 @@ class ThemeManager:
         self.style = style
         self._on_apply = on_apply
 
-        self._themes: list[ThemePalette] = deserialize_theme_store_palettes(_DEFAULT_STORE)
+        self._themes = deserialize_theme_store_palettes(_DEFAULT_STORE)
         self._active_theme_idx = self._read_active_index()
 
         self._dialog = None
@@ -64,7 +63,7 @@ class ThemeManager:
     def get_active_theme_index(self) -> int:
         return self._active_theme_idx
 
-    def get_active_theme(self) -> ThemePalette:
+    def get_active_theme(self):
         return self._themes[self._active_theme_idx]
 
     def activate_theme_index(self, theme_idx: int):
@@ -234,7 +233,7 @@ class ThemeManager:
         self._select_listbox_index(self._active_theme_idx)
         self._update_preview_from_selection()
 
-    def _activate_by_index(self, idx: int) -> tuple[ThemePalette | None, bool]:
+    def _activate_by_index(self, idx: int):
         if idx < 0 or idx >= len(self._themes):
             return None, False
         if self._active_theme_idx == idx:
@@ -246,7 +245,7 @@ class ThemeManager:
         self._update_listbox_active(old_idx)
         return self._themes[idx], True
 
-    def _apply_dialog_chrome(self, theme: ThemePalette):
+    def _apply_dialog_chrome(self, theme):
         dialog = self._dialog
         if not dialog or not dialog.winfo_exists():
             return
@@ -261,7 +260,7 @@ class ThemeManager:
         self.style.layout(_PREVIEW_BORDER, self.style.layout("Border.TFrame"))
         self.style.configure(_PREVIEW_BORDER, relief="solid")
 
-    def _apply_preview_colors(self, theme: ThemePalette):
+    def _apply_preview_colors(self, theme):
         self.style.configure(
             _PREVIEW_FRAME,
             background=theme.bg,
@@ -319,24 +318,5 @@ class ThemeManager:
         )
 
     def _center_dialog(self):
-        dialog = self._dialog
-        master = self.master
-        if not dialog or not master:
-            return
-
-        dialog.update_idletasks()
-        master.update_idletasks()
-
-        if master.winfo_exists():
-            x0 = master.winfo_rootx()
-            y0 = master.winfo_rooty()
-            w0 = master.winfo_width()
-            h0 = master.winfo_height()
-
-            w = dialog.winfo_reqwidth()
-            h = dialog.winfo_reqheight()
-
-            x = x0 + (w0 - w) // 2
-            y = y0 + (h0 - h) // 2
-
-            dialog.geometry(f"{w}x{h}+{x}+{y}")
+        if self._dialog and self.master and self.master.winfo_exists():
+            center_on_parent(self._dialog, self.master)

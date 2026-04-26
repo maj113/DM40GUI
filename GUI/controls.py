@@ -1,8 +1,5 @@
-from dm40.types import ThemePalette
-
-
 class UIControls:
-    def __init__(self, master, style, theme: ThemePalette):
+    def __init__(self, master, style, theme):
         self.master = master
         self.style = style
         self.theme = theme
@@ -11,7 +8,7 @@ class UIControls:
         self._init_layouts()
         self.apply_theme()
 
-    def use_theme(self, theme: ThemePalette) -> None:
+    def use_theme(self, theme) -> None:
         self.theme = theme
         self.apply_theme()
 

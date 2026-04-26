@@ -1,4 +1,4 @@
-from dm40.types import ThemePalette
+from shared.types import ThemePalette
 
 
 _COLORS_BLOCK = 7 * 10

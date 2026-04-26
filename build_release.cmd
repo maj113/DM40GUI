@@ -2,7 +2,7 @@
 setlocal EnableExtensions EnableDelayedExpansion
 
 set "DEFAULT_MODE_FLAGS=--deployment"
-set "DEFAULT_CONSOLE_MODE=disable"
+set "DEFAULT_CONSOLE_MODE=force"
 set "DEFAULT_MSVC=latest"
 set "DEFAULT_PYTHON=py -3.13"
 set "DEFAULT_OUT_DIR=build\ci\nuitka"

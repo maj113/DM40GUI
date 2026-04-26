@@ -24,10 +24,7 @@ class AutoScrollbar(ttk.Scrollbar):
 
     def _show(self):
         if not self.winfo_ismapped():
-            if self._grid_kwargs:
-                super().grid(**self._grid_kwargs)
-            else:
-                super().grid()
+            super().grid(**self._grid_kwargs)
 
     def _hide(self):
         if self.winfo_ismapped():
