@@ -57,8 +57,12 @@ MODE_SETPOINT_INFO = {
 
 
 def build_set_setpoint_cmd(value: float, mode: int | None = None) -> bytes:
-    _setpoint_fview[0] = value
-    prefix = _CAP_SETPOINT_PREFIX if mode == MODE_CAP else _SETPOINT_PREFIX
+    if mode == MODE_CAP:
+        _setpoint_fview[0] = value * 0.001
+        prefix = _CAP_SETPOINT_PREFIX
+    else:
+        _setpoint_fview[0] = value
+        prefix = _SETPOINT_PREFIX
     return prefix + bytes(_setpoint_fbuf)
 
 
@@ -67,7 +71,7 @@ def parse_cap_setpoint_response(data: bytes) -> float | None:
         return None
     if (sum(data) & 0xFF) != 0:
         return None
-    return memoryview(data)[5:9].cast('f')[0]
+    return memoryview(data)[5:9].cast('f')[0] * 1000.0
 
 
 def build_control_cmd(*, output_on: bool = False, lock_on: bool = False, clear_alarm: bool = False) -> bytes:
