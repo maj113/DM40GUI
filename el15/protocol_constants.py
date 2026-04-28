@@ -11,10 +11,8 @@ CMD_GET_CAP_SETPOINT = b"\xaf\x07\x03\x0a\x00"
 _setpoint_fbuf = bytearray(4)
 _setpoint_fview = memoryview(_setpoint_fbuf).cast('f')
 
-CMD_LOAD_ON  = b"\xaf\x07\x03\x09\x01\x04"
-CMD_LOAD_OFF = b"\xaf\x07\x03\x09\x01\x00"
-CMD_LOCK     = b"\xaf\x07\x03\x09\x01\x01"
 CMD_MODE_PREFIX = b"\xaf\x07\x03\x03\x01"
+_CONTROL_PREFIX = b"\xaf\x07\x03\x09\x01"
 
 MODE_CC       = 0x01
 MODE_CAP      = 0x02
@@ -72,6 +70,11 @@ def parse_cap_setpoint_response(data: bytes) -> float | None:
     return memoryview(data)[5:9].cast('f')[0]
 
 
+def build_control_cmd(*, output_on: bool = False, lock_on: bool = False, clear_alarm: bool = False) -> bytes:
+    payload = (0x04 if output_on else 0x00) | (0x01 if lock_on else 0x00) | (0x02 if clear_alarm else 0x00)
+    return _CONTROL_PREFIX + bytes((payload,))
+
+
 # Status byte 6 bit layout: bit1=load, bit2=lock; upper nibble=protection code
 _STATUS_LOAD_BIT = 0x02
 _STATUS_LOCK_BIT = 0x04
@@ -80,8 +83,19 @@ _MODE_MASK = 0x1F
 _B5_WARN_FLAG = 0x06   # bits 1+2 are both set when protection has tripped
 FAN_SPEED_MAX = 5
 
-# Upper nibble of byte6 when _B5_WARN_FLAG is set
-_WARN_NAMES = {0x6: "REV", 0x9: "UVP"}
+_ALARMS = (
+    ("", ""),
+    ("OVP", "Overvoltage Protection (OVP)"),
+    ("OCP", "Overcurrent Protection (OCP)"),
+    ("OPP", "Overpower Protection (OPP)"),
+    ("OTP", "Over-temperature Protection (OTP)"),
+    ("LEAK", "Leakage detected"),
+    ("RPP", "Reverse Polarity Protection (RPP)"),
+    ("TIMER END", "Timer end detected"),
+    ("End of cycle!", "End of cycle!"),
+    ("UVP", "Undervoltage Protection (UVP)"),
+    ("ALARM", "Custom alarm"),
+)
 
 
 class EL15Status:
@@ -91,8 +105,9 @@ class EL15Status:
         "energy_wh", "capacity_ah",
         "dcr_mohm", "dcr_i1", "dcr_i2",
         "mode", "mode_name", "fan_speed", "load_on", "lock_on", "ready",
+        "alarm_ui", "timer_switch", "work_mode", "measurement_mode",
         "setpoint_unit", "setpoint_decimals", "setpoint_label",
-        "setpoint_in_packet", "warning",
+        "setpoint_in_packet", "warning_code", "warning",
     )
 
     def __init__(self):
@@ -110,10 +125,15 @@ class EL15Status:
         self.load_on = False
         self.lock_on = False
         self.ready = False
+        self.alarm_ui = 0
+        self.timer_switch = False
+        self.work_mode = 0
+        self.measurement_mode = 0
         self.setpoint_unit = "A"
         self.setpoint_decimals = 3
         self.setpoint_label = "Current"
         self.setpoint_in_packet = True
+        self.warning_code = ""
         self.warning = ""
 
 
@@ -131,17 +151,21 @@ def parse_status_packet(data: bytes) -> EL15Status:
     s.power       = s.voltage * s.current
     b5 = data[5]
     b6 = data[6]
-    # Bits 1+2 of byte5 are BOTH set when protection has tripped. Each bit
-    # individually is part of normal mode encoding (CAP=0x02, DCR=0x0A etc.),
-    # so the fault test must require both bits set simultaneously.
-    # Bit 0 is the "ready/measuring" flag for CC/CV/CR/CP.
-    warn_flag     = (b5 & _B5_WARN_FLAG) == _B5_WARN_FLAG
+    status_word   = b5 | (b6 << 8)
+    s.alarm_ui = (status_word >> 12) & 0x0F
+    s.timer_switch = ((status_word >> 11) & 0x01) != 0
+    s.work_mode = (status_word >> 3) & 0x07
+    s.measurement_mode = status_word & 0x07
+    warn_flag     = s.alarm_ui != 0
     raw_mode      = (b5 & (_MODE_MASK & ~_B5_WARN_FLAG)) if warn_flag else (b5 & _MODE_MASK)
     mode          = raw_mode if raw_mode in MODE_NAMES else (raw_mode | 0x01)
     s.mode        = mode
     if warn_flag:
-        warn_code = b6 >> 4
-        s.warning = _WARN_NAMES.get(warn_code, "PROT %X" % warn_code)
+        if 0 <= s.alarm_ui < len(_ALARMS):
+            s.warning_code, s.warning = _ALARMS[s.alarm_ui]
+        else:
+            s.warning_code = "ALARM %X" % s.alarm_ui
+            s.warning = s.warning_code
         s.ready   = False
     else:
         s.ready   = (raw_mode & 0x01) != 0 or mode in (MODE_CAP, MODE_DCR, MODE_ADV, MODE_POWER, MODE_DT, MODE_ADV_SCAN, MODE_POWER_RPT)
@@ -170,7 +194,7 @@ def parse_status_packet(data: bytes) -> EL15Status:
         s.setpoint    = mv[23:27].cast('f')[0]
     # Fan speed (0=off..5=max) is split across two bytes:
     # byte5 bits 6-7 -> low 2 bits, byte6 bit 0 -> MSB. Byte5 bit 5 is unused.
-    s.fan_speed   = (b5 >> 6) | ((b6 & 0x01) << 2)
+    s.fan_speed   = (status_word >> 6) & 0x07
     s.load_on     = (b6 & _STATUS_LOAD_BIT) != 0
     s.lock_on     = (b6 & _STATUS_LOCK_BIT) != 0
     s.mode_name   = MODE_NAMES.get(mode, "?%02X" % mode)
