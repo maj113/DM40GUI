@@ -8,14 +8,17 @@ from GUI.themed_messagebox import show_error
 from .protocol_constants import (
     EL15Status,
     HEADER,
+    CAP_SETPOINT_HEADER,
     POLL_PKT,
     CMD_LOAD_OFF,
     CMD_LOAD_ON,
     CMD_MODE_PREFIX,
+    CMD_GET_CAP_SETPOINT,
     MODE_NAMES,
     MODE_CC, MODE_CV, MODE_CR, MODE_CP, MODE_CAP, MODE_DCR,
     MODE_ADV, MODE_POWER, MODE_DT, MODE_ADV_SCAN, MODE_POWER_RPT,
     build_set_setpoint_cmd,
+    parse_cap_setpoint_response,
     parse_status_packet,
 )
 
@@ -33,7 +36,7 @@ _HIDE_RUNTIME = (MODE_DCR, MODE_ADV, MODE_POWER, MODE_DT, MODE_ADV_SCAN, MODE_PO
 
 
 def _el15_notify_filter(data: bytes) -> bool:
-    return data[:4] == HEADER
+    return data[:4] in (HEADER, CAP_SETPOINT_HEADER)
 
 
 _FMT6 = ("%.5f", "%.4f", "%.3f", "%.2f", "%.1f")
@@ -53,6 +56,8 @@ class EL15Handler:
         self.app = app
         self._last_status: EL15Status | None = None
         self._last_valid_mode: int = MODE_CC
+        self._cap_setpoint: float | None = None
+        self._cap_setpoint_query_pending = False
         self._mode_var = tk.IntVar(value=MODE_CC)
         self._load_var = tk.BooleanVar(value=False)
         self._all_controls: list = []
@@ -176,7 +181,11 @@ class EL15Handler:
         for widget in self._all_controls:
             widget.state([state])
 
-    def pre_connect_reset(self) -> None: pass
+    def pre_connect_reset(self) -> None:
+        self._last_status = None
+        self._cap_setpoint = None
+        self._cap_setpoint_query_pending = False
+
     def clear_capture(self) -> None: pass
     def on_connected(self) -> None: pass
     def teardown(self) -> None: pass
@@ -187,11 +196,29 @@ class EL15Handler:
         s = parse_status_packet(data)
         app._append_raw_text(f"RX {s.raw}  CRC:{s.crc_str}\n")
 
+        cap_setpoint = parse_cap_setpoint_response(data)
+        if cap_setpoint is not None:
+            self._cap_setpoint = cap_setpoint
+            last = self._last_status
+            if last is not None and last.mode == MODE_CAP:
+                self._apply_status_buttons(last)
+            return
+
         if not s.valid:
             return
 
+        prev_mode = self._last_status.mode if self._last_status else None
         self._last_status = s
         self._apply_status_buttons(s)
+
+        if s.mode == MODE_CAP:
+            if prev_mode != MODE_CAP:
+                self._cap_setpoint_query_pending = True
+            if self._cap_setpoint_query_pending:
+                self._cap_setpoint_query_pending = False
+                self.app.send_command(CMD_GET_CAP_SETPOINT)
+        else:
+            self._cap_setpoint_query_pending = False
 
         if s.ready:
             if s.mode == MODE_DCR:
@@ -296,9 +323,16 @@ class EL15Handler:
             self._setpoint_var.set("")
             return
         # Keep the setpoint entry synced to the device unless the user is editing
-        # it. In CAP mode the packet doesn't carry a setpoint, so preserve the
-        # last value the user typed.
+        # it. CAP reports its setpoint through a separate 0x0A readback packet.
         focus = self._setpoint_entry.focus_get()
+        if (
+            s.mode == MODE_CAP
+            and self._cap_setpoint is not None
+            and focus is not self._setpoint_entry
+            and focus is not self._setpoint_btn
+        ):
+            self._setpoint_var.set(f"{self._cap_setpoint:.{s.setpoint_decimals}f}")
+            return
         if (
             s.ready and s.setpoint_in_packet
             and focus is not self._setpoint_entry
@@ -325,4 +359,8 @@ class EL15Handler:
             show_error(self.app, "Setpoint", "Enter a valid numeric value.",
                        theme=(self.app.ui.theme.bg, self.app.ui.theme.outline))
             return
-        self.app.send_command(build_set_setpoint_cmd(value))
+        last = self._last_status
+        mode = last.mode if last is not None else self._last_valid_mode
+        if mode == MODE_CAP:
+            self._cap_setpoint_query_pending = True
+        self.app.send_command(build_set_setpoint_cmd(value, mode))

@@ -1,10 +1,13 @@
 """EL15 protocol constants and packet parsing."""
 
 HEADER   = b"\xdf\x07\x03\x08"
+CAP_SETPOINT_HEADER = b"\xdf\x07\x03\x0a"
 # Pre-computed poll packet (CMD_QUERY prefix + CRC byte 0x3F)
 POLL_PKT = b"\xaf\x07\x03\x08\x00\x3f"
 
 _SETPOINT_PREFIX = b"\xaf\x07\x03\x04\x04"
+_CAP_SETPOINT_PREFIX = b"\xaf\x07\x03\x05\x04"
+CMD_GET_CAP_SETPOINT = b"\xaf\x07\x03\x0a\x00"
 _setpoint_fbuf = bytearray(4)
 _setpoint_fview = memoryview(_setpoint_fbuf).cast('f')
 
@@ -42,7 +45,7 @@ MODE_NAMES = {
 # (unit_str, decimal_places, label)
 MODE_SETPOINT_INFO = {
     MODE_CC:       ("A",  3, "Current"),
-    MODE_CAP:      ("A",  3, "Current"),
+    MODE_CAP:      ("mA", 3, "Current"),
     MODE_CV:       ("V",  3, "Voltage"),
     MODE_DCR:      ("A",  3, "Current"),
     MODE_CR:       ("Ω",  1, "Resistance"),
@@ -55,9 +58,18 @@ MODE_SETPOINT_INFO = {
 }
 
 
-def build_set_setpoint_cmd(value: float) -> bytes:
+def build_set_setpoint_cmd(value: float, mode: int | None = None) -> bytes:
     _setpoint_fview[0] = value
-    return _SETPOINT_PREFIX + bytes(_setpoint_fbuf)
+    prefix = _CAP_SETPOINT_PREFIX if mode == MODE_CAP else _SETPOINT_PREFIX
+    return prefix + bytes(_setpoint_fbuf)
+
+
+def parse_cap_setpoint_response(data: bytes) -> float | None:
+    if len(data) < 10 or data[:4] != CAP_SETPOINT_HEADER or data[4] != 0x04:
+        return None
+    if (sum(data) & 0xFF) != 0:
+        return None
+    return memoryview(data)[5:9].cast('f')[0]
 
 
 # Status byte 6 bit layout: bit1=load, bit2=lock; upper nibble=protection code
