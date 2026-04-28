@@ -253,8 +253,9 @@ class EL15Handler:
                     f"{s.setpoint_label}: {s.setpoint:.{s.setpoint_decimals}f} {s.setpoint_unit}"
                 )
             rs = s.runtime
+            runtime_label = "Timer" if s.timer_switch and s.load_on else "Runtime"
             self._info_runtime_var.set(
-                "Runtime: %02d:%02d:%02d" % (rs // 3600, (rs % 3600) // 60, rs % 60)
+                "%s: %02d:%02d:%02d" % (runtime_label, rs // 3600, (rs % 3600) // 60, rs % 60)
             )
             self._mode_label_var.set(f"EL15 [LOAD {'ON' if s.load_on else 'OFF'}]")
         else:
