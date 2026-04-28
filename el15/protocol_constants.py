@@ -177,7 +177,7 @@ def parse_status_packet(data: bytes) -> EL15Status:
     # Bytes [15:19], [19:23] and [23:27] carry mode-specific measurements.
     #   CC/CV/CR/CP: runtime(i), temperature(f), setpoint(f)
     #   CAP:         runtime(i), energy(f, mWh),   capacity(f, mAh)
-    #   DCR:         I1(f, A),   I2(f, A),         resistance(f, m\u03a9); [11:15] unused
+    #   DCR:         current(f), I1(f, A),         I2(f, A),         resistance(f, m\u03a9)
     #   ADV/POWER:   unused (V/I only; power computed)
     if mode == MODE_CAP:
         s.energy_wh   = mv[19:23].cast('f')[0] * 0.001
@@ -188,8 +188,6 @@ def parse_status_packet(data: bytes) -> EL15Status:
         s.dcr_i2   = mv[19:23].cast('f')[0]
         s.dcr_mohm = mv[23:27].cast('f')[0]
         s.runtime  = 0
-        s.current  = 0.0
-        s.power    = 0.0
         s.setpoint_in_packet = False
     elif mode in (MODE_ADV, MODE_POWER, MODE_DT, MODE_POWER_RPT):
         s.runtime  = 0

@@ -231,12 +231,8 @@ class EL15Handler:
             self._cap_setpoint_query_pending = False
 
         if s.ready:
-            if s.mode == MODE_DCR:
-                self._amp_label.configure(text=f"{_fmt6(s.dcr_i1)} A")
-                self._watt_label.configure(text=f"{s.dcr_mohm:.1f} m\u03a9")
-            else:
-                self._amp_label.configure(text=f"{_fmt6(s.current)} A")
-                self._watt_label.configure(text=f"{_fmt6(s.power)} W")
+            self._amp_label.configure(text=f"{_fmt6(s.current)} A")
+            self._watt_label.configure(text=f"{_fmt6(s.power)} W")
             self._info_load_var.set(
                 f"Load: {'ON' if s.load_on else 'OFF'}  Lock: {'ON' if s.lock_on else 'OFF'}"
             )
