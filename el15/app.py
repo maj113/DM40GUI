@@ -63,7 +63,7 @@ class EL15Handler:
             poll_cmd=POLL_PKT,
             notify_hook=_el15_notify_filter,
             write_buf_size=10,
-            cmd_requires_notify=False,
+            cmd_requires_notify=True,
             **callbacks,
         )
 
@@ -153,13 +153,21 @@ class EL15Handler:
         tk.Label(bar, textvariable=self._setpoint_unit_var, width=2).pack(
             side=tk.LEFT, padx=(0, 6)
         )
-        ttk.Button(bar, text="Set", style="MenuBar.TButton",
-                   command=self._on_set_setpoint, padding=6, width=0).pack(side=tk.LEFT)
+        self._setpoint_btn = ttk.Button(
+            bar,
+            text="Set",
+            style="MenuBar.TButton",
+            command=self._on_set_setpoint,
+            padding=6,
+            width=0,
+        )
+        self._setpoint_btn.pack(side=tk.LEFT)
 
         self._all_controls = [
             *self._mode_buttons,
             self._load_btn,
             self._setpoint_entry,
+            self._setpoint_btn,
         ]
         self.set_control_state(False)
 
@@ -286,12 +294,15 @@ class EL15Handler:
         self._setpoint_entry.state(["disabled" if unreachable else "!disabled"])
         if unreachable:
             self._setpoint_var.set("")
+            return
         # Keep the setpoint entry synced to the device unless the user is editing
         # it. In CAP mode the packet doesn't carry a setpoint, so preserve the
         # last value the user typed.
+        focus = self._setpoint_entry.focus_get()
         if (
             s.ready and s.setpoint_in_packet
-            and self._setpoint_entry.focus_get() is not self._setpoint_entry
+            and focus is not self._setpoint_entry
+            and focus is not self._setpoint_btn
         ):
             self._setpoint_var.set(f"{s.setpoint:.{s.setpoint_decimals}f}")
 
