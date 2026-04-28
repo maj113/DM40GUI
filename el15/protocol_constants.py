@@ -43,7 +43,7 @@ MODE_NAMES = {
 # (unit_str, decimal_places, label)
 MODE_SETPOINT_INFO = {
     MODE_CC:       ("A",  3, "Current"),
-    MODE_CAP:      ("mA", 3, "Current"),
+    MODE_CAP:      ("mA", 0, "Current"),
     MODE_CV:       ("V",  3, "Voltage"),
     MODE_DCR:      ("A",  3, "Current"),
     MODE_CR:       ("Ω",  1, "Resistance"),
@@ -58,7 +58,8 @@ MODE_SETPOINT_INFO = {
 
 def build_set_setpoint_cmd(value: float, mode: int | None = None) -> bytes:
     if mode == MODE_CAP:
-        _setpoint_fview[0] = value * 0.001
+        cap_ma = max(0, min(12000, round(value)))
+        _setpoint_fview[0] = cap_ma * 0.001
         prefix = _CAP_SETPOINT_PREFIX
     else:
         _setpoint_fview[0] = value
@@ -71,7 +72,7 @@ def parse_cap_setpoint_response(data: bytes) -> float | None:
         return None
     if (sum(data) & 0xFF) != 0:
         return None
-    return memoryview(data)[5:9].cast('f')[0] * 1000.0
+    return round(memoryview(data)[5:9].cast('f')[0] * 1000.0)
 
 
 def build_control_cmd(*, output_on: bool = False, lock_on: bool = False, clear_alarm: bool = False) -> bytes:
