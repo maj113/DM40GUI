@@ -3,19 +3,21 @@ import tkinter as tk
 from tkinter import ttk
 
 from shared.ble_worker import BleWorker
-from GUI.themed_messagebox import show_error
+from GUI.themed_messagebox import show_clear, show_error
 
 from .protocol_constants import (
     EL15Status,
     HEADER,
+    CAP_SETPOINT_HEADER,
     POLL_PKT,
-    CMD_LOAD_OFF,
-    CMD_LOAD_ON,
     CMD_MODE_PREFIX,
+    CMD_GET_CAP_SETPOINT,
     MODE_NAMES,
     MODE_CC, MODE_CV, MODE_CR, MODE_CP, MODE_CAP, MODE_DCR,
     MODE_ADV, MODE_POWER, MODE_DT, MODE_ADV_SCAN, MODE_POWER_RPT,
+    build_control_cmd,
     build_set_setpoint_cmd,
+    parse_cap_setpoint_response,
     parse_status_packet,
 )
 
@@ -33,7 +35,7 @@ _HIDE_RUNTIME = (MODE_DCR, MODE_ADV, MODE_POWER, MODE_DT, MODE_ADV_SCAN, MODE_PO
 
 
 def _el15_notify_filter(data: bytes) -> bool:
-    return data[:4] == HEADER
+    return data[:4] in (HEADER, CAP_SETPOINT_HEADER)
 
 
 _FMT6 = ("%.5f", "%.4f", "%.3f", "%.2f", "%.1f")
@@ -53,8 +55,12 @@ class EL15Handler:
         self.app = app
         self._last_status: EL15Status | None = None
         self._last_valid_mode: int = MODE_CC
+        self._last_alarm_ui = 0
+        self._cap_setpoint: float | None = None
+        self._cap_setpoint_query_pending = False
         self._mode_var = tk.IntVar(value=MODE_CC)
         self._load_var = tk.BooleanVar(value=False)
+        self._lock_var = tk.BooleanVar(value=False)
         self._all_controls: list = []
 
     def create_worker(self, device, **callbacks):
@@ -63,7 +69,7 @@ class EL15Handler:
             poll_cmd=POLL_PKT,
             notify_hook=_el15_notify_filter,
             write_buf_size=10,
-            cmd_requires_notify=False,
+            cmd_requires_notify=True,
             **callbacks,
         )
 
@@ -142,7 +148,13 @@ class EL15Handler:
             bar, text="Load", style="MenuBar.TCheckbutton",
             variable=self._load_var, command=self._on_load_clicked,
         )
-        self._load_btn.pack(side=tk.LEFT, padx=(0, 18))
+        self._load_btn.pack(side=tk.LEFT, padx=(0, 6))
+
+        self._lock_btn = ttk.Checkbutton(
+            bar, text="Lock", style="MenuBar.TCheckbutton",
+            variable=self._lock_var, command=self._on_lock_clicked,
+        )
+        self._lock_btn.pack(side=tk.LEFT, padx=(0, 18))
 
         tk.Label(bar, text="Setpoint:").pack(side=tk.LEFT, padx=(0, 4))
         self._setpoint_var = tk.StringVar(value="")
@@ -153,13 +165,22 @@ class EL15Handler:
         tk.Label(bar, textvariable=self._setpoint_unit_var, width=2).pack(
             side=tk.LEFT, padx=(0, 6)
         )
-        ttk.Button(bar, text="Set", style="MenuBar.TButton",
-                   command=self._on_set_setpoint, padding=6, width=0).pack(side=tk.LEFT)
+        self._setpoint_btn = ttk.Button(
+            bar,
+            text="Set",
+            style="MenuBar.TButton",
+            command=self._on_set_setpoint,
+            padding=6,
+            width=0,
+        )
+        self._setpoint_btn.pack(side=tk.LEFT)
 
         self._all_controls = [
             *self._mode_buttons,
             self._load_btn,
+            self._lock_btn,
             self._setpoint_entry,
+            self._setpoint_btn,
         ]
         self.set_control_state(False)
 
@@ -168,7 +189,12 @@ class EL15Handler:
         for widget in self._all_controls:
             widget.state([state])
 
-    def pre_connect_reset(self) -> None: pass
+    def pre_connect_reset(self) -> None:
+        self._last_status = None
+        self._last_alarm_ui = 0
+        self._cap_setpoint = None
+        self._cap_setpoint_query_pending = False
+
     def clear_capture(self) -> None: pass
     def on_connected(self) -> None: pass
     def teardown(self) -> None: pass
@@ -179,19 +205,34 @@ class EL15Handler:
         s = parse_status_packet(data)
         app._append_raw_text(f"RX {s.raw}  CRC:{s.crc_str}\n")
 
+        cap_setpoint = parse_cap_setpoint_response(data)
+        if cap_setpoint is not None:
+            self._cap_setpoint = cap_setpoint
+            last = self._last_status
+            if last is not None and last.mode == MODE_CAP:
+                self._apply_status_buttons(last)
+            return
+
         if not s.valid:
             return
 
+        prev_mode = self._last_status.mode if self._last_status else None
         self._last_status = s
         self._apply_status_buttons(s)
+        self._handle_alarm(s)
+
+        if s.mode == MODE_CAP:
+            if prev_mode != MODE_CAP:
+                self._cap_setpoint_query_pending = True
+            if self._cap_setpoint_query_pending:
+                self._cap_setpoint_query_pending = False
+                self.app.send_command(CMD_GET_CAP_SETPOINT)
+        else:
+            self._cap_setpoint_query_pending = False
 
         if s.ready:
-            if s.mode == MODE_DCR:
-                self._amp_label.configure(text=f"{_fmt6(s.dcr_i1)} A")
-                self._watt_label.configure(text=f"{s.dcr_mohm:.1f} m\u03a9")
-            else:
-                self._amp_label.configure(text=f"{_fmt6(s.current)} A")
-                self._watt_label.configure(text=f"{_fmt6(s.power)} W")
+            self._amp_label.configure(text=f"{_fmt6(s.current)} A")
+            self._watt_label.configure(text=f"{_fmt6(s.power)} W")
             self._info_load_var.set(
                 f"Load: {'ON' if s.load_on else 'OFF'}  Lock: {'ON' if s.lock_on else 'OFF'}"
             )
@@ -208,8 +249,9 @@ class EL15Handler:
                     f"{s.setpoint_label}: {s.setpoint:.{s.setpoint_decimals}f} {s.setpoint_unit}"
                 )
             rs = s.runtime
+            runtime_label = "Timer" if s.timer_switch and s.load_on else "Runtime"
             self._info_runtime_var.set(
-                "Runtime: %02d:%02d:%02d" % (rs // 3600, (rs % 3600) // 60, rs % 60)
+                "%s: %02d:%02d:%02d" % (runtime_label, rs // 3600, (rs % 3600) // 60, rs % 60)
             )
             self._mode_label_var.set(f"EL15 [LOAD {'ON' if s.load_on else 'OFF'}]")
         else:
@@ -218,18 +260,18 @@ class EL15Handler:
             self._info_load_var.set("Load: ---  Lock: ---")
             self._info_setp_var.set(f"{s.setpoint_label}: ---")
             self._info_runtime_var.set("Runtime: --:--:--")
-            if s.warning:
-                self._mode_label_var.set(f"EL15 [PROT: {s.warning}]")
+            if s.warning_code:
+                self._mode_label_var.set(f"EL15 [PROT: {s.warning_code}]")
             else:
                 self._mode_label_var.set("EL15 [MENU]")
 
         self._volt_label.configure(text=f"{_fmt6(s.voltage)} V")
         self._info_mode_var.set(f"Mode: {s.mode_name}")
-        if not s.warning:
+        if not s.warning_code:
             self._info_temp_var.set(f"Temp: {s.temperature:.3f}\u00b0C")
         self._info_fan_var.set(f"Fan: {s.fan_speed}/5")
-        if s.warning:
-            self._info_warn_var.set(f"\u26a0 {s.warning}")
+        if s.warning_code:
+            self._info_warn_var.set(f"\u26a0 {s.warning_code}")
         else:
             self._info_warn_var.set("")
 
@@ -240,7 +282,7 @@ class EL15Handler:
         hide_setp    = mode in _UNREACHABLE
         for key, hide in (
             ("temp", hide_temp), ("runtime", hide_runtime), ("setp", hide_setp),
-            ("warn", not s.warning),
+            ("warn", not s.warning_code),
         ):
             lbl = self._info_labels[key]
             if hide:
@@ -282,18 +324,52 @@ class EL15Handler:
             self._unreach_btn.configure(text="---")
         self._mode_var.set(display_mode)
         self._load_var.set(s.load_on)
+        self._lock_var.set(s.lock_on)
         self._setpoint_unit_var.set(s.setpoint_unit)
         self._setpoint_entry.state(["disabled" if unreachable else "!disabled"])
         if unreachable:
             self._setpoint_var.set("")
+            return
         # Keep the setpoint entry synced to the device unless the user is editing
-        # it. In CAP mode the packet doesn't carry a setpoint, so preserve the
-        # last value the user typed.
+        # it. CAP reports its setpoint through a separate 0x0A readback packet.
+        focus = self._setpoint_entry.focus_get()
+        if (
+            s.mode == MODE_CAP
+            and self._cap_setpoint is not None
+            and focus is not self._setpoint_entry
+            and focus is not self._setpoint_btn
+        ):
+            self._setpoint_var.set(f"{self._cap_setpoint:.{s.setpoint_decimals}f}")
+            return
         if (
             s.ready and s.setpoint_in_packet
-            and self._setpoint_entry.focus_get() is not self._setpoint_entry
+            and focus is not self._setpoint_entry
+            and focus is not self._setpoint_btn
         ):
             self._setpoint_var.set(f"{s.setpoint:.{s.setpoint_decimals}f}")
+
+    def _handle_alarm(self, s: EL15Status) -> None:
+        alarm_ui = s.alarm_ui
+        if alarm_ui == 0:
+            self._last_alarm_ui = 0
+            return
+        if alarm_ui == self._last_alarm_ui:
+            return
+        self._last_alarm_ui = alarm_ui
+        if show_clear(
+            self.app,
+            "EL15 Alarm",
+            s.warning,
+            theme=(self.app.ui.theme.bg, self.app.ui.theme.outline),
+            detail=None,
+        ):
+            self.app.send_command(
+                build_control_cmd(
+                    output_on=s.load_on,
+                    lock_on=s.lock_on,
+                    clear_alarm=True,
+                )
+            )
 
     def _on_mode_clicked(self, mode_val: int) -> None:
         # Revert the radio until the device confirms via the next status packet.
@@ -303,9 +379,16 @@ class EL15Handler:
     def _on_load_clicked(self) -> None:
         last = self._last_status
         desired_on = self._load_var.get()
-        # Revert visible toggle; status packet will update it once the device responds.
+        lock_on = bool(last and last.lock_on)
         self._load_var.set(bool(last and last.load_on))
-        self.app.send_command(CMD_LOAD_ON if desired_on else CMD_LOAD_OFF)
+        self.app.send_command(build_control_cmd(output_on=desired_on, lock_on=lock_on))
+
+    def _on_lock_clicked(self) -> None:
+        last = self._last_status
+        desired_on = self._lock_var.get()
+        load_on = bool(last and last.load_on)
+        self._lock_var.set(bool(last and last.lock_on))
+        self.app.send_command(build_control_cmd(output_on=load_on, lock_on=desired_on))
 
     def _on_set_setpoint(self, _event=None) -> None:
         try:
@@ -314,4 +397,8 @@ class EL15Handler:
             show_error(self.app, "Setpoint", "Enter a valid numeric value.",
                        theme=(self.app.ui.theme.bg, self.app.ui.theme.outline))
             return
-        self.app.send_command(build_set_setpoint_cmd(value))
+        last = self._last_status
+        mode = last.mode if last is not None else self._last_valid_mode
+        if mode == MODE_CAP:
+            self._cap_setpoint_query_pending = True
+        self.app.send_command(build_set_setpoint_cmd(value, mode))

@@ -93,6 +93,8 @@ class _ThemedDialog(tk.Toplevel):
 
     def _apply_minsize(self):
         container = self._layout_root
+        if container is None:
+            return
         try:
             container.update_idletasks()
             required_w = container.winfo_reqwidth()
@@ -164,6 +166,20 @@ def show_error(parent, title, message, *, theme: tuple, detail=None):
         buttons=[("OK", True)],
         default=True,
         cancel_value=True,
+        detail=detail,
+    )
+
+
+def show_clear(parent, title, message, *, theme: tuple, detail=None):
+    return _show_dialog(
+        parent,
+        title,
+        message,
+        theme=theme,
+        icon=_ERROR_ICON,
+        buttons=[("Clear", True)],
+        default=True,
+        cancel_value=False,
         detail=detail,
     )
 
